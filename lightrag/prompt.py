@@ -4,9 +4,26 @@ from typing import Any
 
 PROMPTS: dict[str, Any] = {}
 
+PROMPTS["DEFAULT_LANGUAGE"] = "English"
 PROMPTS["DEFAULT_TUPLE_DELIMITER"] = "<|>"
 PROMPTS["DEFAULT_RECORD_DELIMITER"] = "##"
 PROMPTS["DEFAULT_COMPLETION_DELIMITER"] = "<|COMPLETE|>"
+
+# PROMPTS["DEFAULT_ENTITY_TYPES"] = ["organization", "person", "geo", "event", "category"]
+PROMPTS["DEFAULT_ENTITY_TYPES"] = [
+    "organization",      # Company, partner, vendor
+    "person",            # Employee, executive, contractor
+    "team",              # Department, squad, group
+    "project",           # Internal initiatives, OKRs
+    "document",          # Files, reports, wikis, notes
+    "product",           # Products, services, features
+    "event",             # Meetings, launches, training
+    "task",              # Tickets, issues, action items
+    "location",          # Office, HQ, remote site
+    "technology",        # Tools, tech stack, SaaS apps
+    "customer",          # Client, account, partner org
+]
+
 
 PROMPTS["DEFAULT_USER_PROMPT"] = "n/a"
 
@@ -37,19 +54,22 @@ Format the content-level key words as ("content_keywords"{tuple_delimiter}<high_
 
 5. When finished, output {completion_delimiter}
 
+######################
 ---Examples---
+######################
 {examples}
 
+#############################
 ---Real Data---
+######################
 Entity_types: [{entity_types}]
 Text:
 {input_text}
-
----Output---
+######################
 Output:"""
 
 PROMPTS["entity_extraction_examples"] = [
-    """------Example 1------
+    """Example 1:
 
 Entity_types: [person, technology, mission, organization, location]
 Text:
@@ -75,9 +95,8 @@ Output:
 ("relationship"{tuple_delimiter}"Jordan"{tuple_delimiter}"Cruz"{tuple_delimiter}"Jordan's commitment to discovery is in rebellion against Cruz's vision of control and order."{tuple_delimiter}"ideological conflict, rebellion"{tuple_delimiter}5){record_delimiter}
 ("relationship"{tuple_delimiter}"Taylor"{tuple_delimiter}"The Device"{tuple_delimiter}"Taylor shows reverence towards the device, indicating its importance and potential impact."{tuple_delimiter}"reverence, technological significance"{tuple_delimiter}9){record_delimiter}
 ("content_keywords"{tuple_delimiter}"power dynamics, ideological conflict, discovery, rebellion"){completion_delimiter}
-
-""",
-    """------Example 2------
+#############################""",
+    """Example 2:
 
 Entity_types: [company, index, commodity, market_trend, economic_policy, biological]
 Text:
@@ -104,9 +123,8 @@ Output:
 ("relationship"{tuple_delimiter}"Gold Futures"{tuple_delimiter}"Market Selloff"{tuple_delimiter}"Gold prices rose as investors sought safe-haven assets during the market selloff."{tuple_delimiter}"market reaction, safe-haven investment"{tuple_delimiter}10){record_delimiter}
 ("relationship"{tuple_delimiter}"Federal Reserve Policy Announcement"{tuple_delimiter}"Market Selloff"{tuple_delimiter}"Speculation over Federal Reserve policy changes contributed to market volatility and investor selloff."{tuple_delimiter}"interest rate impact, financial regulation"{tuple_delimiter}7){record_delimiter}
 ("content_keywords"{tuple_delimiter}"market downturn, investor sentiment, commodities, Federal Reserve, stock performance"){completion_delimiter}
-
-""",
-    """------Example 3------
+#############################""",
+    """Example 3:
 
 Entity_types: [economic_policy, athlete, event, location, record, organization, equipment]
 Text:
@@ -126,29 +144,23 @@ Output:
 ("relationship"{tuple_delimiter}"Noah Carter"{tuple_delimiter}"Carbon-Fiber Spikes"{tuple_delimiter}"Noah Carter used carbon-fiber spikes to enhance performance during the race."{tuple_delimiter}"athletic equipment, performance boost"{tuple_delimiter}7){record_delimiter}
 ("relationship"{tuple_delimiter}"World Athletics Federation"{tuple_delimiter}"100m Sprint Record"{tuple_delimiter}"The World Athletics Federation is responsible for validating and recognizing new sprint records."{tuple_delimiter}"sports regulation, record certification"{tuple_delimiter}9){record_delimiter}
 ("content_keywords"{tuple_delimiter}"athletics, sprinting, record-breaking, sports technology, competition"){completion_delimiter}
-
-""",
+#############################""",
 ]
 
-PROMPTS["summarize_entity_descriptions"] = """---Role---
-You are a Knowledge Graph Specialist responsible for data curation and synthesis.
+PROMPTS[
+    "summarize_entity_descriptions"
+] = """You are a helpful assistant responsible for generating a comprehensive summary of the data provided below.
+Given one or two entities, and a list of descriptions, all related to the same entity or group of entities.
+Please concatenate all of these into a single, comprehensive description. Make sure to include information collected from all the descriptions.
+If the provided descriptions are contradictory, please resolve the contradictions and provide a single, coherent summary.
+Make sure it is written in third person, and include the entity names so we the have full context.
+Use {language} as output language.
 
----Task---
-Your task is to synthesize a list of descriptions of a given entity or relation into a single, comprehensive, and cohesive summary.
-
----Instructions---
-1. **Comprehensiveness:** The summary must integrate key information from all provided descriptions. Do not omit important facts.
-2. **Context:** The summary must explicitly mention the name of the entity or relation for full context.
-3. **Style:** The output must be written from an objective, third-person perspective.
-4. **Length:** Maintain depth and completeness while ensuring the summary's length not exceed {summary_length} tokens.
-5. **Language:** The entire output must be written in {language}.
-
+#######
 ---Data---
-{description_type} Name: {description_name}
-Description List:
-{description_list}
-
----Output---
+Entities: {entity_name}
+Description List: {description_list}
+#######
 Output:
 """
 
@@ -212,7 +224,7 @@ Generate a concise response based on Knowledge Base and follow Response Rules, c
 ---Knowledge Graph and Document Chunks---
 {context_data}
 
----Response Guidelines---
+---RESPONSE GUIDELINES---
 **1. Content & Adherence:**
 - Strictly adhere to the provided context from the Knowledge Base. Do not invent, assume, or include any information not present in the source data.
 - If the answer cannot be found in the provided context, state that you do not have enough information to answer.
@@ -234,8 +246,8 @@ Generate a concise response based on Knowledge Base and follow Response Rules, c
 ---USER CONTEXT---
 - Additional user prompt: {user_prompt}
 
----Response---
-Output:"""
+
+Response:"""
 
 PROMPTS["keywords_extraction"] = """---Role---
 You are an expert keyword extractor, specializing in analyzing user queries for a Retrieval-Augmented Generation (RAG) system. Your purpose is to identify both high-level and low-level keywords in the user's query that will be used for effective document retrieval.
@@ -294,6 +306,229 @@ Output:
 }
 
 """,
+]
+
+PROMPTS["hierarchical_grouping"] = """---Goal---
+Given entities that have exceeded edge thresholds, create functional categories that group them by their PURPOSE and BUSINESS WORKFLOW. Focus on creating meaningful intermediate entities that reduce parent node connections.
+
+Use {language} as output language.
+
+---AVAILABLE ENTITY TYPES---
+You MUST strictly use these entity types when creating categories. DO NOT invent new types:
+{entity_types}
+
+---ENTITY TYPE DISTRIBUTION---
+{entity_type_analysis}
+
+---CORE REQUIREMENTS---
+1. Create MINIMUM 2 functional subcategories (not type-based)
+2. Route entities to subcategories ONLY IF POSSIBLE - direct parent connection is acceptable
+3. Categories must be FUNCTIONAL/WORKFLOW-based, never type-based
+4. Complete rerouting required - all previous edges will be deleted
+5. You CAN RENAME entity names if needed for better organization, except renaming all entity names must be same as present in input
+6. **STRICTLY use only the provided entity types above - no custom types**
+
+---FORBIDDEN PATTERNS---
+❌ NEVER create: "CATEGORY_person", "CATEGORY_technology"
+❌ NEVER group by data type (person, organization, technology, etc.)
+❌ NEVER invent new entity types - use ONLY the provided entity types
+✅ ALWAYS create functional workflow groups: "Authentication Pipeline", "System Operations Hub", "Customer Support Center"
+
+---SIMPLE 3-STEP PROCESS---
+
+STEP 1: ANALYZE FUNCTIONAL DOMAINS
+- Look at what these entities DO together in business workflows
+- Identify 2-3 major functional areas that can absorb most entities
+- Focus on business processes, not entity types
+
+STEP 2: CREATE FUNCTIONAL CATEGORIES
+For each functional category, create:
+("new_node"{tuple_delimiter}<category_name>{tuple_delimiter}<entity_type_from_list_above>{tuple_delimiter}<business_description>{tuple_delimiter}<confidence>)
+
+Where:
+- category_name: Descriptive workflow name (e.g., "Identity Verification Pipeline", "Infrastructure Operations Center")
+- entity_type_from_list_above: **MUST be one of the provided entity types** (organization, team, project, etc.)
+- business_description: What this category accomplishes in business context
+- confidence: 0.8-1.0
+
+STEP 3: ROUTE ALL ENTITIES
+For EVERY entity provided, create exactly one edge:
+("new_edge"{tuple_delimiter}<entity_name_or_renamed>{tuple_delimiter}<target_category_or_PARENT_NODE>{tuple_delimiter}<why_this_entity_belongs_here>{tuple_delimiter}<relationship_keywords>{tuple_delimiter}<strength_8_to_10>)
+
+ROUTING STRATEGY:
+- Route entities to subcategories ONLY IF they fit well semantically
+- Direct PARENT_NODE connections are perfectly acceptable for entities that don't fit subcategories
+- Prioritize semantic fit - do NOT force entities into categories
+- You can rename entities for better organization and clarity
+
+OPTIONAL ENTITY RENAMING:
+If an entity name can be improved for clarity or organization, create a rename record:
+("rename_entity"{tuple_delimiter}<original_entity_name>{tuple_delimiter}<new_entity_name>{tuple_delimiter}<reason_for_rename>)
+
+STEP 4: FINAL CONNECTIVITY CHECK
+MANDATORY: Before submitting, verify ALL entities from input are connected:
+- Count total entities in input list
+- Count total new_edge records created
+- These numbers MUST MATCH exactly
+- If any entity is missing, add its new_edge record immediately
+- NO ENTITY CAN BE LEFT UNCONNECTED
+
+---NAMING EXAMPLES BY DOMAIN---
+🔐 **Authentication/Security**: "Identity Verification Pipeline", "Security Operations Center", "Access Control Hub"
+🖥️ **Infrastructure/Systems**: "Platform Operations Hub", "Infrastructure Management Center", "System Reliability Stack"
+👥 **User/Customer**: "Customer Experience Center", "User Lifecycle Management", "Support Operations Hub"
+💳 **Business/Commerce**: "Transaction Processing Center", "Order Fulfillment Engine", "Revenue Operations Hub"
+📊 **Data/Analytics**: "Data Processing Pipeline", "Analytics Operations Center", "Information Management Hub"
+
+---QUALITY CHECKLIST---
+Before submitting, verify:
+□ Created MINIMUM 2 functional subcategories (new_node records)
+□ Every entity has exactly one new_edge record
+□ No type-based category names
+□ Entities routed to subcategories ONLY IF good semantic fit
+□ Direct PARENT_NODE connections are acceptable
+□ All category names describe business functions/workflows
+□ Optional: Entity renames improve clarity and organization
+
+---MANDATORY CONNECTIVITY VERIFICATION---
+CRITICAL: Count entities vs edges to ensure complete coverage:
+□ Count total entities in input: ___ entities
+□ Count total new_edge records: ___ edges  
+□ Numbers MUST MATCH - if not, find missing entities and add their edges
+□ Double-check entity names match exactly between input and new_edge records
+□ NO ENTITY can be missed or left unconnected
+
+---Domain Context---
+{domain_context}
+
+---Examples---
+{examples}
+
+---Input Data---
+Max_categories: {max_groups}
+ENTITIES TO GROUP:
+{entities_list}
+
+---Output Format---
+Return all records using {record_delimiter} as delimiter, end with {completion_delimiter}
+
+---FINAL VERIFICATION STEP---
+BEFORE OUTPUTTING: 
+1. Verify you have exactly ONE new_edge record for EACH entity in the input list
+2. Verify ALL new_node records use ONLY the provided entity types from the list above
+3. Count entities: {total_entities} input entities MUST equal number of new_edge records
+Input has {total_entities} entities - your output MUST have exactly {total_entities} new_edge records.
+If any entity is missing from your new_edge records, add it now with appropriate routing.
+
+Output:"""
+
+PROMPTS["hierarchical_grouping_examples"] = [
+    """Example 1:
+
+Max_categories: 3  
+Domain_context: Authentication and security workflows detected  
+Available Entity Types: organization, person, team, project, document, product, event, task, location, technology, customer  
+
+ENTITIES TO GROUP:  
+Entity 1: aadhaar (Type: technology) - Authentication system used for KYC verification processes  
+Entity 2: uidai (Type: organization) - Unique Identification Authority of India, the issuing authority for Aadhaar  
+Entity 3: kyc process (Type: task) - Know Your Customer verification process requiring Aadhaar authentication  
+Entity 4: api timeout (Type: event) - UIDAI API timeout events occurring frequently  
+Entity 5: certificate validation (Type: task) - Certificate validation process that is failing  
+Entity 6: legacy system (Type: technology) - Old authentication system being phased out  
+Entity 7: compliance officer (Type: person) - Officer ensuring regulatory compliance  
+
+Output:  
+("new_node"{tuple_delimiter}"Identity Verification Pipeline"{tuple_delimiter}"project"{tuple_delimiter}"Core authentication workflow that processes user identity verification through Aadhaar system, including KYC compliance and regulatory oversight"{tuple_delimiter}0.9){record_delimiter}  
+("new_node"{tuple_delimiter}"System Operations Hub"{tuple_delimiter}"team"{tuple_delimiter}"Operational monitoring team that handles API timeouts, certificate validation, and system health monitoring"{tuple_delimiter}0.8){record_delimiter}  
+("rename_entity"{tuple_delimiter}"api timeout"{tuple_delimiter}"aadhaar_api_timeout_events"{tuple_delimiter}"More specific name indicating these are Aadhaar-specific API timeout events"){record_delimiter}  
+("new_edge"{tuple_delimiter}"aadhaar"{tuple_delimiter}"Identity Verification Pipeline"{tuple_delimiter}"Core authentication technology that enables the entire identity verification workflow"{tuple_delimiter}"authentication, identity verification, core technology"{tuple_delimiter}9){record_delimiter}  
+("new_edge"{tuple_delimiter}"uidai"{tuple_delimiter}"Identity Verification Pipeline"{tuple_delimiter}"Governing authority that manages and regulates the identity verification workflow"{tuple_delimiter}"regulatory authority, workflow governance"{tuple_delimiter}8){record_delimiter}  
+("new_edge"{tuple_delimiter}"kyc process"{tuple_delimiter}"Identity Verification Pipeline"{tuple_delimiter}"Primary business process within the identity verification workflow"{tuple_delimiter}"business process, compliance workflow"{tuple_delimiter}9){record_delimiter}  
+("new_edge"{tuple_delimiter}"aadhaar_api_timeout_events"{tuple_delimiter}"System Operations Hub"{tuple_delimiter}"Critical system event that requires monitoring and operational response"{tuple_delimiter}"system monitoring, operational response"{tuple_delimiter}8){record_delimiter}  
+("new_edge"{tuple_delimiter}"certificate validation"{tuple_delimiter}"System Operations Hub"{tuple_delimiter}"Security validation process that requires operational monitoring"{tuple_delimiter}"security validation, operational monitoring"{tuple_delimiter}8){record_delimiter}  
+("new_edge"{tuple_delimiter}"legacy system"{tuple_delimiter}"PARENT_NODE"{tuple_delimiter}"Legacy technology that doesn't fit well into current functional workflows - acceptable direct connection"{tuple_delimiter}"legacy integration, direct connection"{tuple_delimiter}6){record_delimiter}  
+("new_edge"{tuple_delimiter}"compliance officer"{tuple_delimiter}"PARENT_NODE"{tuple_delimiter}"Oversight role that spans multiple functional areas - acceptable direct connection"{tuple_delimiter}"oversight, multi-domain responsibility"{tuple_delimiter}7){record_delimiter}  
+("major_category"{tuple_delimiter}"Identity Verification Pipeline"{tuple_delimiter}"Primary business workflow that delivers core authentication services to customers"){completion_delimiter}  
+#############################""",
+    
+    """Example 2:
+
+Max_categories: 2
+Domain_context: Infrastructure operations and user management workflows detected
+Available Entity Types: organization, person, team, project, document, product, event, task, location, technology, customer
+
+ENTITIES TO GROUP:
+Entity 1: production environment (Type: technology) - Live system environment hosting customer applications
+Entity 2: system admin (Type: person) - Administrator responsible for infrastructure management
+Entity 3: deployment pipeline (Type: technology) - Automated system for code deployment and updates
+Entity 4: user onboarding (Type: task) - Process for registering and setting up new users
+Entity 5: customer support (Type: team) - Team handling user inquiries and technical issues
+
+Output:
+("new_node"{tuple_delimiter}"Platform Operations Center"{tuple_delimiter}"team"{tuple_delimiter}"Infrastructure management hub that coordinates production environment, deployment automation, and system administration"{tuple_delimiter}0.9){record_delimiter}
+("new_node"{tuple_delimiter}"Customer Success Hub"{tuple_delimiter}"team"{tuple_delimiter}"Customer-facing operations center that handles user onboarding and ongoing support services"{tuple_delimiter}0.8){record_delimiter}
+("new_edge"{tuple_delimiter}"production environment"{tuple_delimiter}"Platform Operations Center"{tuple_delimiter}"Core infrastructure component that requires operational management and monitoring"{tuple_delimiter}"infrastructure management, production operations"{tuple_delimiter}9){record_delimiter}
+("new_edge"{tuple_delimiter}"system admin"{tuple_delimiter}"Platform Operations Center"{tuple_delimiter}"Key operational role responsible for managing platform infrastructure"{tuple_delimiter}"infrastructure management, operational responsibility"{tuple_delimiter}8){record_delimiter}
+("new_edge"{tuple_delimiter}"deployment pipeline"{tuple_delimiter}"Platform Operations Center"{tuple_delimiter}"Automated infrastructure process that enables platform operations"{tuple_delimiter}"deployment automation, infrastructure process"{tuple_delimiter}9){record_delimiter}
+("new_edge"{tuple_delimiter}"user onboarding"{tuple_delimiter}"Customer Success Hub"{tuple_delimiter}"Primary customer-facing process that initiates user experience"{tuple_delimiter}"customer onboarding, user experience"{tuple_delimiter}9){record_delimiter}
+("new_edge"{tuple_delimiter}"customer support"{tuple_delimiter}"Customer Success Hub"{tuple_delimiter}"Ongoing customer service function that ensures positive user experience"{tuple_delimiter}"customer service, user experience"{tuple_delimiter}8){record_delimiter}
+("major_category"{tuple_delimiter}"Platform Operations Center"{tuple_delimiter}"Foundational infrastructure that enables all customer-facing services"){completion_delimiter}
+#############################""",
+    
+    """Example 3:
+
+Max_categories: 2
+Domain_context: E-commerce and transaction processing workflows detected
+Available Entity Types: organization, person, team, project, document, product, event, task, location, technology, customer
+
+ENTITIES TO GROUP:
+Entity 1: payment gateway (Type: technology) - System processing customer payments and transactions
+Entity 2: inventory management (Type: task) - Process tracking product availability and stock levels
+Entity 3: order fulfillment (Type: task) - Process handling order processing and shipping
+Entity 4: customer account (Type: technology) - System managing user profiles and order history
+Entity 5: shipping documentation (Type: document) - Documents required for order shipping and tracking
+Entity 6: e_commerce_customers (Type: customer) - Online customers placing orders
+
+Output:
+("new_node"{tuple_delimiter}"Transaction Processing Engine"{tuple_delimiter}"project"{tuple_delimiter}"Payment processing workflow that handles customer transactions and financial operations"{tuple_delimiter}0.9){record_delimiter}
+("new_node"{tuple_delimiter}"Order Management Pipeline"{tuple_delimiter}"project"{tuple_delimiter}"Order fulfillment workflow that manages inventory, order processing, customer accounts and shipping documentation"{tuple_delimiter}0.8){record_delimiter}
+("new_edge"{tuple_delimiter}"payment gateway"{tuple_delimiter}"Transaction Processing Engine"{tuple_delimiter}"Core payment technology that enables financial transaction processing"{tuple_delimiter}"payment processing, financial transactions"{tuple_delimiter}9){record_delimiter}
+("new_edge"{tuple_delimiter}"inventory management"{tuple_delimiter}"Order Management Pipeline"{tuple_delimiter}"Inventory tracking process essential for order fulfillment workflow"{tuple_delimiter}"inventory tracking, order fulfillment"{tuple_delimiter}8){record_delimiter}
+("new_edge"{tuple_delimiter}"order fulfillment"{tuple_delimiter}"Order Management Pipeline"{tuple_delimiter}"Core fulfillment process that delivers products to customers"{tuple_delimiter}"order processing, fulfillment operations"{tuple_delimiter}9){record_delimiter}
+("new_edge"{tuple_delimiter}"customer account"{tuple_delimiter}"Order Management Pipeline"{tuple_delimiter}"Customer management system that tracks order history and user profiles"{tuple_delimiter}"customer management, order tracking"{tuple_delimiter}8){record_delimiter}
+("new_edge"{tuple_delimiter}"shipping documentation"{tuple_delimiter}"Order Management Pipeline"{tuple_delimiter}"Required documentation for order processing and shipping workflow"{tuple_delimiter}"shipping documents, order processing"{tuple_delimiter}7){record_delimiter}
+("new_edge"{tuple_delimiter}"e_commerce_customers"{tuple_delimiter}"PARENT_NODE"{tuple_delimiter}"Customer base that spans multiple functional workflows - direct parent connection"{tuple_delimiter}"customer management, multi-workflow"{tuple_delimiter}6){record_delimiter}
+("major_category"{tuple_delimiter}"Order Management Pipeline"{tuple_delimiter}"Primary customer-facing workflow that delivers products and drives revenue"){completion_delimiter}
+#############################""",
+
+    """Example 4:
+
+Max_categories: 2
+Domain_context: Office management and corporate events workflows detected
+Available Entity Types: organization, person, team, project, document, product, event, task, location, technology, customer
+
+ENTITIES TO GROUP:
+Entity 1: quarterly meeting (Type: event) - Regular corporate meeting for business reviews
+Entity 2: conference room booking (Type: task) - Process for reserving meeting spaces
+Entity 3: office headquarters (Type: location) - Main corporate office building
+Entity 4: hr policies document (Type: document) - Employee handbook and HR policies
+Entity 5: marketing team (Type: team) - Marketing department team
+Entity 6: product launch (Type: event) - New product announcement and launch event
+Entity 7: training program (Type: project) - Employee development training initiative
+
+Output:
+("new_node"{tuple_delimiter}"Corporate Operations Hub"{tuple_delimiter}"team"{tuple_delimiter}"Centralized operations team managing office facilities, document management, and administrative processes"{tuple_delimiter}0.8){record_delimiter}
+("new_node"{tuple_delimiter}"Business Events & Training Center"{tuple_delimiter}"project"{tuple_delimiter}"Event coordination and training project managing corporate meetings, product launches, and employee development"{tuple_delimiter}0.9){record_delimiter}
+("new_edge"{tuple_delimiter}"conference room booking"{tuple_delimiter}"Corporate Operations Hub"{tuple_delimiter}"Administrative task managed by corporate operations for facility management"{tuple_delimiter}"facility management, administrative operations"{tuple_delimiter}8){record_delimiter}
+("new_edge"{tuple_delimiter}"office headquarters"{tuple_delimiter}"Corporate Operations Hub"{tuple_delimiter}"Physical location managed and maintained by corporate operations"{tuple_delimiter}"facility management, location operations"{tuple_delimiter}8){record_delimiter}
+("new_edge"{tuple_delimiter}"hr policies document"{tuple_delimiter}"Corporate Operations Hub"{tuple_delimiter}"Corporate documentation managed by administrative operations"{tuple_delimiter}"document management, corporate policies"{tuple_delimiter}7){record_delimiter}
+("new_edge"{tuple_delimiter}"quarterly meeting"{tuple_delimiter}"Business Events & Training Center"{tuple_delimiter}"Regular corporate event coordinated by business events project"{tuple_delimiter}"event coordination, business meetings"{tuple_delimiter}9){record_delimiter}
+("new_edge"{tuple_delimiter}"product launch"{tuple_delimiter}"Business Events & Training Center"{tuple_delimiter}"Major business event managed by events and training coordination"{tuple_delimiter}"event coordination, product management"{tuple_delimiter}9){record_delimiter}
+("new_edge"{tuple_delimiter}"training program"{tuple_delimiter}"Business Events & Training Center"{tuple_delimiter}"Employee development project that fits directly into training center operations"{tuple_delimiter}"training coordination, employee development"{tuple_delimiter}9){record_delimiter}
+("new_edge"{tuple_delimiter}"marketing team"{tuple_delimiter}"PARENT_NODE"{tuple_delimiter}"Cross-functional team that works with multiple operational areas - direct parent connection"{tuple_delimiter}"cross-functional, team coordination"{tuple_delimiter}6){record_delimiter}
+("major_category"{tuple_delimiter}"Business Events & Training Center"{tuple_delimiter}"Strategic business coordination that drives company growth and employee development"){completion_delimiter}
+#############################""",
 ]
 
 PROMPTS["naive_rag_response"] = """---Role---
