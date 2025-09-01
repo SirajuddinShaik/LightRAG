@@ -25,13 +25,13 @@ load_dotenv(dotenv_path=".env", override=False)
 @dataclass
 class NetworkXStorage(BaseGraphStorage):
     @staticmethod
-    def load_nx_graph(file_name) -> nx.Graph:
+    def load_nx_graph(file_name) -> nx.DiGraph:
         if os.path.exists(file_name):
             return nx.read_graphml(file_name)
         return None
 
     @staticmethod
-    def write_nx_graph(graph: nx.Graph, file_name, workspace="_"):
+    def write_nx_graph(graph: nx.DiGraph, file_name, workspace="_"):
         logger.info(
             f"[{workspace}] Writing graph with {graph.number_of_nodes()} nodes, {graph.number_of_edges()} edges"
         )
@@ -67,7 +67,7 @@ class NetworkXStorage(BaseGraphStorage):
             logger.info(
                 f"[{self.workspace}] Created new empty graph fiel: {self._graphml_xml_file}"
             )
-        self._graph = preloaded_graph or nx.Graph()
+        self._graph = preloaded_graph or nx.DiGraph()
 
     async def initialize(self):
         """Initialize storage data"""
@@ -87,7 +87,7 @@ class NetworkXStorage(BaseGraphStorage):
                 )
                 # Reload data
                 self._graph = (
-                    NetworkXStorage.load_nx_graph(self._graphml_xml_file) or nx.Graph()
+                    NetworkXStorage.load_nx_graph(self._graphml_xml_file) or nx.DiGraph()
                 )
                 # Reset update flag
                 self.storage_updated.value = False
@@ -109,6 +109,11 @@ class NetworkXStorage(BaseGraphStorage):
     async def node_degree(self, node_id: str) -> int:
         graph = await self._get_graph()
         return graph.degree(node_id)
+    
+    async def node_out_edges(self, node_id: str) -> int:
+        """Get the number of outgoing edges from a node."""
+        outbound_edges = await self.get_outbound_edges(node_id)
+        return outbound_edges
 
     async def edge_degree(self, src_id: str, tgt_id: str) -> int:
         graph = await self._get_graph()
@@ -127,6 +132,45 @@ class NetworkXStorage(BaseGraphStorage):
         if graph.has_node(source_node_id):
             return list(graph.edges(source_node_id))
         return None
+    
+    async def get_outbound_edges(self, source_node_id: str) -> list[tuple[str, str]] | None:
+        """Get only outbound edges from a source node.
+        
+        For undirected graphs, this returns all edges where source_node_id appears first.
+        For directed graphs, this would return only outgoing edges.
+        """
+        graph = await self._get_graph()
+        if not graph.has_node(source_node_id):
+            return None
+        
+        # For undirected graphs, we need to filter edges to get consistent "outbound" direction
+        outbound_edges = []
+        for edge in graph.edges(source_node_id):
+            src, tgt = edge
+            # Ensure source_node_id is always the source in the returned tuple
+            if src == source_node_id:
+                outbound_edges.append((src, tgt))
+            else:
+                outbound_edges.append((tgt, src))  # Flip to make source_node_id the source
+        
+        return outbound_edges
+
+    async def get_inbound_edges(self, source_node_id: str) -> list[tuple[str, str]] | None:
+        graph = await self._get_graph()
+        if not graph.has_node(source_node_id):
+            return None
+
+        # For undirected graphs, we need to filter edges to get consistent "inbound" direction
+        inbound_edges = []
+        for edge in graph.edges(source_node_id):
+            src, tgt = edge
+            # Ensure source_node_id is always the target in the returned tuple
+            if tgt == source_node_id:
+                inbound_edges.append((src, tgt))
+            else:
+                inbound_edges.append((tgt, src))  # Flip to make source_node_id the target
+
+        return inbound_edges
 
     async def upsert_node(self, node_id: str, node_data: dict[str, str]) -> None:
         """
@@ -135,8 +179,17 @@ class NetworkXStorage(BaseGraphStorage):
         2. Only one process should updating the storage at a time before index_done_callback,
            KG-storage-log should be used to avoid data corruption
         """
+        # Convert list/dict data to JSON strings for GraphML compatibility
+        import json
+        processed_data = {}
+        for key, value in node_data.items():
+            if isinstance(value, (list, dict)):
+                processed_data[key] = json.dumps(value)
+            else:
+                processed_data[key] = value
+        
         graph = await self._get_graph()
-        graph.add_node(node_id, **node_data)
+        graph.add_node(node_id, **processed_data)
 
     async def upsert_edge(
         self, source_node_id: str, target_node_id: str, edge_data: dict[str, str]
@@ -147,8 +200,17 @@ class NetworkXStorage(BaseGraphStorage):
         2. Only one process should updating the storage at a time before index_done_callback,
            KG-storage-log should be used to avoid data corruption
         """
+        # Convert list/dict data to JSON strings for GraphML compatibility
+        import json
+        processed_data = {}
+        for key, value in edge_data.items():
+            if isinstance(value, (list, dict)):
+                processed_data[key] = json.dumps(value)
+            else:
+                processed_data[key] = value
+        
         graph = await self._get_graph()
-        graph.add_edge(source_node_id, target_node_id, **edge_data)
+        graph.add_edge(u_of_edge=source_node_id, v_of_edge=target_node_id, **processed_data)
 
     async def delete_node(self, node_id: str) -> None:
         """
@@ -440,7 +502,7 @@ class NetworkXStorage(BaseGraphStorage):
                     f"[{self.workspace}] Graph was updated by another process, reloading..."
                 )
                 self._graph = (
-                    NetworkXStorage.load_nx_graph(self._graphml_xml_file) or nx.Graph()
+                    NetworkXStorage.load_nx_graph(self._graphml_xml_file) or nx.DiGraph()
                 )
                 # Reset update flag
                 self.storage_updated.value = False
@@ -483,7 +545,7 @@ class NetworkXStorage(BaseGraphStorage):
                 # delete _client_file_name
                 if os.path.exists(self._graphml_xml_file):
                     os.remove(self._graphml_xml_file)
-                self._graph = nx.Graph()
+                self._graph = nx.DiGraph()
                 # Notify other processes that data has been updated
                 await set_all_update_flags(self.final_namespace)
                 # Reset own update flag to avoid self-reloading

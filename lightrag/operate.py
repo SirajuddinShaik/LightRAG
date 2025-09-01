@@ -40,6 +40,7 @@ from .base import (
     TextChunkSchema,
     QueryParam,
 )
+from .hierarchical_edge_manager import HierarchicalEdgeManager
 from .prompt import PROMPTS
 from .constants import (
     GRAPH_FIELD_SEP,
@@ -114,6 +115,92 @@ def chunking_by_token_size(
                 }
             )
     return results
+
+
+async def _generate_entity_subcategories(
+    entity_name: str,
+    description: str, 
+    entity_type: str,
+    global_config: dict[str, str],
+    llm_response_cache: BaseKVStorage | None = None,
+) -> list[str]:
+    """Generate subcategories for an entity using LLM."""
+    try:
+        use_llm_func = global_config["llm_model_func"]
+        
+        prompt = f"""
+Generate 3-5 specific subcategories for the following entity that would help with similarity matching and hierarchical organization.
+
+Entity: {entity_name}
+Type: {entity_type}
+Description: {description}
+
+Requirements:
+1. Subcategories should be specific and meaningful
+2. Focus on functional aspects, not just entity type
+3. Consider the entity's role in business workflows
+4. Each subcategory should be 1-3 words
+5. Return as a JSON list of strings
+
+Example output: ["authentication", "security_validation", "user_verification"]
+
+Subcategories:
+"""
+        
+        # Use cache if available
+        cache_key = None
+        if llm_response_cache:
+            cache_key = f"subcategories:{compute_mdhash_id(entity_name + description + entity_type)}"
+            cached_result = await llm_response_cache.get_by_id(cache_key)
+            if cached_result:
+                try:
+                    import json
+                    return json.loads(cached_result.get("return", "[]"))
+                except (json.JSONDecodeError, ValueError):
+                    pass
+        
+        response = await use_llm_func(prompt)
+        
+        # Parse JSON response
+        import re
+        import json
+        json_match = re.search(r'\[.*?\]', response, re.DOTALL)
+        if json_match:
+            subcategories = json.loads(json_match.group())
+            result = [cat.lower().strip() for cat in subcategories if isinstance(cat, str)]
+        else:
+            # Fallback parsing
+            lines = response.strip().split('\n')
+            result = []
+            for line in lines:
+                if line.strip() and not line.startswith('#'):
+                    clean_cat = line.strip().strip('"-').lower()
+                    if clean_cat:
+                        result.append(clean_cat)
+            result = result[:5]  # Limit to 5
+        
+        # Cache the result
+        if llm_response_cache and cache_key and result:
+            await llm_response_cache.upsert({
+                cache_key: {
+                    "return": json.dumps(result),
+                    "cache_type": "subcategories"
+                }
+            })
+        
+        return result if result else ["general"]
+        
+    except Exception as e:
+        logger.error(f"Error generating subcategories for {entity_name}: {e}")
+        # Fallback based on entity type
+        if entity_type.lower() in ["person", "user"]:
+            return ["user_management", "authentication"]
+        elif entity_type.lower() in ["technology", "system"]:
+            return ["system_operations", "infrastructure"]
+        elif entity_type.lower() in ["organization", "company"]:
+            return ["business_operations", "organizational"]
+        else:
+            return ["general", "functional"]
 
 
 async def _handle_entity_relation_summary(
@@ -291,6 +378,7 @@ async def _summarize_descriptions(
     context_base = dict(
         description_type=description_type,
         description_name=description_name,
+        entity_name=description_name,  # Add entity_name parameter for prompt template
         description_list=joined_descriptions,
         summary_length=summary_length_recommended,
         language=language,
@@ -362,6 +450,7 @@ async def _handle_single_entity_extraction(
             description=entity_description,
             source_id=chunk_key,
             file_path=file_path,
+            sub_categories=[]
         )
 
     except ValueError as e:
@@ -867,6 +956,7 @@ async def _rebuild_single_entity(
     chunk_entities: dict,
     llm_response_cache: BaseKVStorage,
     global_config: dict[str, str],
+    subcategories: set[str]
 ) -> None:
     """Rebuild a single entity from cached extraction results"""
 
@@ -877,7 +967,7 @@ async def _rebuild_single_entity(
 
     # Helper function to update entity in both graph and vector storage
     async def _update_entity_storage(
-        final_description: str, entity_type: str, file_paths: set[str]
+        final_description: str, entity_type: str, file_paths: set[str],
     ):
         # Update entity in graph storage
         updated_entity_data = {
@@ -888,6 +978,9 @@ async def _rebuild_single_entity(
             "file_path": GRAPH_FIELD_SEP.join(file_paths)
             if file_paths
             else current_entity.get("file_path", "unknown_source"),
+            "subcategories": GRAPH_FIELD_SEP.join(subcategories) 
+            if subcategories 
+            else current_entity.get("subcategories", "")
         }
         await knowledge_graph_inst.upsert_node(entity_name, updated_entity_data)
 
@@ -904,6 +997,7 @@ async def _rebuild_single_entity(
                     "description": final_description,
                     "entity_type": entity_type,
                     "file_path": updated_entity_data["file_path"],
+                    "subcategories": updated_entity_data["subcategories"],
                 }
             }
         )
@@ -1207,6 +1301,21 @@ async def _merge_nodes_then_upsert(
         file_path=file_path,
         created_at=int(time.time()),
     )
+    
+    # Generate subcategories if hierarchical edge management is enabled
+    use_hierarchical_edges = global_config.get("use_hierarchical_edges", False)
+    if use_hierarchical_edges:
+        try:
+            subcategories = await _generate_entity_subcategories(
+                entity_name, description, entity_type, global_config, llm_response_cache
+            )
+            if subcategories:
+                # Store as JSON string for GraphML compatibility
+                import json
+                node_data["subcategories"] = json.dumps(subcategories)
+        except Exception as e:
+            logger.warning(f"Failed to generate subcategories for {entity_name}: {e}")
+    
     await knowledge_graph_inst.upsert_node(
         entity_name,
         node_data=node_data,
@@ -1225,6 +1334,8 @@ async def _merge_edges_then_upsert(
     pipeline_status_lock=None,
     llm_response_cache: BaseKVStorage | None = None,
     added_entities: list = None,  # New parameter to track entities added during edge processing
+    entities_vdb: BaseVectorStorage = None,  # Add entities_vdb for hierarchical manager
+    relationships_vdb: BaseVectorStorage = None,  # Add relationships_vdb for hierarchical manager
 ):
     if src_id == tgt_id:
         return None
@@ -1358,18 +1469,42 @@ async def _merge_edges_then_upsert(
                 }
                 added_entities.append(entity_data)
 
-    await knowledge_graph_inst.upsert_edge(
-        src_id,
-        tgt_id,
-        edge_data=dict(
-            weight=weight,
-            description=description,
-            keywords=keywords,
-            source_id=source_id,
-            file_path=file_path,
-            created_at=int(time.time()),
-        ),
+    # Prepare edge data
+    edge_data_dict = dict(
+        weight=weight,
+        description=description,
+        keywords=keywords,
+        source_id=source_id,
+        file_path=file_path,
+        created_at=int(time.time()),
     )
+    
+    # Check if hierarchical edge management is enabled
+    use_hierarchical_edges = global_config.get("use_hierarchical_edges", True)
+    edge_limit = global_config.get("edge_limit", 20)
+    
+    if use_hierarchical_edges and entities_vdb is not None:
+        # Use hierarchical edge manager for smart routing
+        hierarchical_manager = HierarchicalEdgeManager(
+            knowledge_graph_inst=knowledge_graph_inst,
+            entities_vdb=entities_vdb,
+            global_config=global_config,
+            edge_limit=edge_limit,
+            relationships_vdb=relationships_vdb,
+            llm_response_cache=llm_response_cache
+        )
+        
+        # Use smart edge routing
+        success = await hierarchical_manager.smart_edge_routing(
+            src_id, tgt_id, edge_data_dict
+        )
+        
+        if not success:
+            # Fallback to normal edge creation if hierarchical routing fails
+            await knowledge_graph_inst.upsert_edge(src_id, tgt_id, edge_data_dict)
+    else:
+        # Normal edge creation without hierarchical management
+        await knowledge_graph_inst.upsert_edge(src_id, tgt_id, edge_data_dict)
 
     edge_data = dict(
         src_id=src_id,
@@ -1544,6 +1679,8 @@ async def merge_nodes_and_edges(
                     pipeline_status_lock,
                     llm_response_cache,
                     added_entities,  # Pass list to collect added entities
+                    entity_vdb,  # Pass entities_vdb for hierarchical management,
+                    relationships_vdb
                 )
 
                 if edge_data is None:

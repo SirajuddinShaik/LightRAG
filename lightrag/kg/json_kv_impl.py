@@ -46,6 +46,7 @@ class JsonKVStorage(BaseKVStorage):
 
     async def initialize(self):
         """Initialize storage data"""
+        print(f"Initializing JSON KV Storage for namespace: {self.namespace}")
         self._storage_lock = get_storage_lock()
         self.storage_updated = await get_update_flag(self.final_namespace)
         async with get_data_init_lock():
@@ -99,6 +100,8 @@ class JsonKVStorage(BaseKVStorage):
                     # Ensure time fields are present, provide default values for old data
                     data.setdefault("create_time", 0)
                     data.setdefault("update_time", 0)
+                    # Deserialize JSON strings back to lists/dicts
+                    data = self._deserialize_complex_data(data)
                     result[key] = data
                 else:
                     result[key] = value
@@ -115,6 +118,8 @@ class JsonKVStorage(BaseKVStorage):
                 result.setdefault("update_time", 0)
                 # Ensure _id field contains the clean ID
                 result["_id"] = id
+                # Deserialize JSON strings back to lists/dicts
+                result = self._deserialize_complex_data(result)
             return result
 
     async def get_by_ids(self, ids: list[str]) -> list[dict[str, Any]]:
@@ -130,6 +135,8 @@ class JsonKVStorage(BaseKVStorage):
                     result.setdefault("update_time", 0)
                     # Ensure _id field contains the clean ID
                     result["_id"] = id
+                    # Deserialize JSON strings back to lists/dicts
+                    result = self._deserialize_complex_data(result)
                     results.append(result)
                 else:
                     results.append(None)
@@ -164,6 +171,9 @@ class JsonKVStorage(BaseKVStorage):
                 if self.namespace.endswith("text_chunks"):
                     if "llm_cache_list" not in v:
                         v["llm_cache_list"] = []
+
+                # Serialize complex data types (lists/dicts) to JSON strings
+                v = self._serialize_complex_data(v)
 
                 # Add timestamps based on whether key exists
                 if k in self._data:  # Key exists, only update update_time
@@ -276,6 +286,32 @@ class JsonKVStorage(BaseKVStorage):
             write_json(migrated_data, self._file_name)
 
         return migrated_data
+
+    def _serialize_complex_data(self, data: dict) -> dict:
+        """Serialize lists and dicts to JSON strings for storage compatibility."""
+        import json
+        serialized = {}
+        for key, value in data.items():
+            if isinstance(value, (list, dict)):
+                serialized[key] = json.dumps(value)
+            else:
+                serialized[key] = value
+        return serialized
+    
+    def _deserialize_complex_data(self, data: dict) -> dict:
+        """Deserialize JSON strings back to lists and dicts."""
+        import json
+        deserialized = {}
+        for key, value in data.items():
+            if isinstance(value, str) and (value.startswith('[') or value.startswith('{')):
+                try:
+                    deserialized[key] = json.loads(value)
+                except (json.JSONDecodeError, ValueError):
+                    # Keep as string if not valid JSON
+                    deserialized[key] = value
+            else:
+                deserialized[key] = value
+        return deserialized
 
     async def finalize(self):
         """Finalize storage resources

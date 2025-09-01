@@ -43,6 +43,9 @@ from lightrag.constants import (
     DEFAULT_SUMMARY_LANGUAGE,
     DEFAULT_LLM_TIMEOUT,
     DEFAULT_EMBEDDING_TIMEOUT,
+    DEFAULT_USE_HIERARCHICAL_EDGES,
+    DEFAULT_EDGE_LIMIT,
+    DEFAULT_SIMILARITY_THRESHOLD,
 )
 from lightrag.utils import get_env_value
 
@@ -356,6 +359,19 @@ class LightRAG:
         default=get_env_value("MAX_GRAPH_NODES", DEFAULT_MAX_GRAPH_NODES, int)
     )
     """Maximum number of graph nodes to return in knowledge graph queries."""
+
+    # Hierarchical Edge Management
+    # ---
+
+    use_hierarchical_edges: bool = field(
+        default=get_env_value("USE_HIERARCHICAL_EDGES", DEFAULT_USE_HIERARCHICAL_EDGES, bool)
+    )
+    """Enable hierarchical edge management with smart routing and automatic splitting."""
+
+    edge_limit: int = field(
+        default=get_env_value("EDGE_LIMIT", DEFAULT_EDGE_LIMIT, int)
+    )
+    """Maximum number of edges per node before triggering hierarchical splitting."""
 
     addon_params: dict[str, Any] = field(
         default_factory=lambda: {
@@ -1985,17 +2001,18 @@ class LightRAG:
                 update_storage = True
 
             # Insert entities into vector storage with consistent format
-            data_for_vdb = {
-                compute_mdhash_id(dp["entity_name"], prefix="ent-"): {
+            data_for_vdb = {}
+            for dp in all_entities_data:
+                entity_vdb_data = {
                     "content": dp["entity_name"] + "\n" + dp["description"],
                     "entity_name": dp["entity_name"],
                     "source_id": dp["source_id"],
                     "description": dp["description"],
                     "entity_type": dp["entity_type"],
                     "file_path": dp.get("file_path", "custom_kg"),
+                    "subcategories": dp.get("subcategories", []),
                 }
-                for dp in all_entities_data
-            }
+                data_for_vdb[compute_mdhash_id(dp["entity_name"], prefix="ent-")] = entity_vdb_data
             await self.entities_vdb.upsert(data_for_vdb)
 
             # Insert relationships into vector storage with consistent format

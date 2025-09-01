@@ -73,3 +73,7 @@ test_*
 memory-bank
 memory-bank/
 .clinerules
+
+hf_cache
+outputs
+data

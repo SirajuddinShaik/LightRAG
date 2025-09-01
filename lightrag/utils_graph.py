@@ -326,15 +326,19 @@ async def aedit_entity(
             entity_id = compute_mdhash_id(entity_name, prefix="ent-")
 
             # Prepare data for vector database update
-            entity_data = {
-                entity_id: {
-                    "content": content,
-                    "entity_name": entity_name,
-                    "source_id": source_id,
-                    "description": description,
-                    "entity_type": entity_type,
-                }
+            entity_vdb_data = {
+                "content": content,
+                "entity_name": entity_name,
+                "source_id": source_id,
+                "description": description,
+                "entity_type": entity_type,
             }
+            
+            # Include subcategories if they exist in the node data
+            if "subcategories" in new_node_data:
+                entity_vdb_data["subcategories"] = new_node_data["subcategories"]
+            
+            entity_data = {entity_id: entity_vdb_data}
 
             # Update vector database
             await entities_vdb.upsert(entity_data)

@@ -22,7 +22,7 @@ nest_asyncio.apply()
 load_dotenv()
 gemini_api_key = os.getenv("GEMINI_API_KEY")
 
-WORKING_DIR = "./emails_provider"
+WORKING_DIR = "./data/emails_provider"
 
 if os.path.exists(WORKING_DIR):
     import shutil
@@ -129,7 +129,7 @@ def get_embedding_model():
     global _embedding_model
     if _embedding_model is None:
         print("Loading SentenceTransformer model (this will only happen once)...")
-        _embedding_model = SentenceTransformer("Qwen/Qwen3-Embedding-4B")
+        _embedding_model = SentenceTransformer("Qwen/Qwen3-Embedding-0.6B")
         print("SentenceTransformer model loaded successfully!")
     return _embedding_model
 
@@ -201,7 +201,7 @@ async def embedding_func(texts: list[str]) -> np.ndarray:
             except Exception as single_e:
                 print(f"Failed to process text {i+1}: {single_e}")
                 # Create a zero embedding as fallback
-                embedding_dim = 2560
+                embedding_dim = 1024
                 fallback_embedding = np.zeros((1, embedding_dim))
                 all_embeddings.append(fallback_embedding)
     
@@ -212,7 +212,7 @@ async def embedding_func(texts: list[str]) -> np.ndarray:
         return final_embeddings
     else:
         # Fallback: return zero embeddings
-        embedding_dim = 2560
+        embedding_dim = 1024
         return np.zeros((len(texts), embedding_dim))
 
 
@@ -221,7 +221,7 @@ async def initialize_rag():
         working_dir=WORKING_DIR,
         llm_model_func=llm_model_func,
         embedding_func=EmbeddingFunc(
-            embedding_dim=2560,
+            embedding_dim=1024,
             max_token_size=8192,
             func=embedding_func,
         ),

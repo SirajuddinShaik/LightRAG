@@ -309,7 +309,7 @@ Output:
 ]
 
 PROMPTS["hierarchical_grouping"] = """---Goal---
-Given entities that have exceeded edge thresholds, create functional categories that group them by their PURPOSE and BUSINESS WORKFLOW. Focus on creating meaningful intermediate entities that reduce parent node connections.
+Given entities that have exceeded outbound edge thresholds, create functional categories that group them by their PURPOSE and BUSINESS WORKFLOW. Focus on creating meaningful intermediate entities that reduce parent node outbound connections.
 
 Use {language} as output language.
 

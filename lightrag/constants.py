@@ -60,6 +60,11 @@ DEFAULT_TEMPERATURE = 1.0
 DEFAULT_MAX_ASYNC = 4  # Default maximum async operations
 DEFAULT_MAX_PARALLEL_INSERT = 2  # Default maximum parallel insert operations
 
+# Hierarchical edge management defaults
+DEFAULT_USE_HIERARCHICAL_EDGES = True  # Enable hierarchical edge management
+DEFAULT_EDGE_LIMIT = 50  # Maximum edges per node before triggering hierarchical splitting
+DEFAULT_SIMILARITY_THRESHOLD = 0.7  # Similarity threshold for smart routing
+
 # Embedding configuration defaults
 DEFAULT_EMBEDDING_FUNC_MAX_ASYNC = 8  # Default max async for embedding functions
 DEFAULT_EMBEDDING_BATCH_NUM = 10  # Default batch size for embedding computations
