@@ -715,7 +715,7 @@ def main():
     viewer = CytoscapeGraphMLViewer()
     
     # Load default GraphML file if it exists, otherwise prompt user
-    default_file = "./emails_provider/graph_chunk_entity_relation.graphml"
+    default_file = "./data/vespa_emails_rag1/graph_chunk_entity_relation.graphml"
     if os.path.exists(default_file):
         print(f"📂 Loading default GraphML file: {default_file}")
         success = viewer.load_graphml(default_file)

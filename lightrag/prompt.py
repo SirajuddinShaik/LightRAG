@@ -45,6 +45,9 @@ For each pair of related entities, extract the following information:
 - relationship_description: explanation as to why you think the source entity and the target entity are related to each other
 - relationship_strength: a numeric score indicating strength of the relationship between the source entity and target entity
 - relationship_keywords: one or more high-level key words that summarize the overarching nature of the relationship, focusing on concepts or themes rather than specific details
+
+**IMPORTANT: All relationships are DIRECTED and should have clear directionality from source to target. Consider the logical flow, causality, hierarchy, or influence when determining the direction. For example: "Company A" -> "Product B" (company produces product), "Manager C" -> "Team D" (manager leads team), "Event E" -> "Outcome F" (event causes outcome). This directional structure is essential for unidirectional graph traversal.**
+
 Format each relationship as ("relationship"{tuple_delimiter}<source_entity>{tuple_delimiter}<target_entity>{tuple_delimiter}<relationship_description>{tuple_delimiter}<relationship_keywords>{tuple_delimiter}<relationship_strength>)
 
 3. Identify high-level key words that summarize the main concepts, themes, or topics of the entire text. These should capture the overarching ideas present in the document.
@@ -182,6 +185,9 @@ For each pair of related entities, extract the following information:
 - relationship_description: explanation as to why you think the source entity and the target entity are related to each other
 - relationship_strength: a numeric score indicating strength of the relationship between the source entity and target entity
 - relationship_keywords: one or more high-level key words that summarize the overarching nature of the relationship, focusing on concepts or themes rather than specific details
+
+**IMPORTANT: All relationships are DIRECTED and should have clear directionality from source to target. Consider the logical flow, causality, hierarchy, or influence when determining the direction. For example: "Company A" -> "Product B" (company produces product), "Manager C" -> "Team D" (manager leads team), "Event E" -> "Outcome F" (event causes outcome). This directional structure is essential for unidirectional graph traversal.**
+
 Format each relationship as ("relationship"{tuple_delimiter}<source_entity>{tuple_delimiter}<target_entity>{tuple_delimiter}<relationship_description>{tuple_delimiter}<relationship_keywords>{tuple_delimiter}<relationship_strength>)
 
 3. Identify high-level key words that summarize the main concepts, themes, or topics of the entire text. These should capture the overarching ideas present in the document.
@@ -353,11 +359,11 @@ Where:
 
 STEP 3: ROUTE ALL ENTITIES
 For EVERY entity provided, create exactly one edge:
-("new_edge"{tuple_delimiter}<entity_name_or_renamed>{tuple_delimiter}<target_category_or_PARENT_NODE>{tuple_delimiter}<why_this_entity_belongs_here>{tuple_delimiter}<relationship_keywords>{tuple_delimiter}<strength_8_to_10>)
+("new_edge"{tuple_delimiter}<entity_name_or_renamed>{tuple_delimiter}<target_category_or_{parent_node_name}>{tuple_delimiter}<why_this_entity_belongs_here>{tuple_delimiter}<relationship_keywords>{tuple_delimiter}<strength_8_to_10>)
 
 ROUTING STRATEGY:
 - Route entities to subcategories ONLY IF they fit well semantically
-- Direct PARENT_NODE connections are perfectly acceptable for entities that don't fit subcategories
+- Direct parent node connections are perfectly acceptable for entities that don't fit subcategories
 - Prioritize semantic fit - do NOT force entities into categories
 - You can rename entities for better organization and clarity
 
@@ -386,7 +392,7 @@ Before submitting, verify:
 □ Every entity has exactly one new_edge record
 □ No type-based category names
 □ Entities routed to subcategories ONLY IF good semantic fit
-□ Direct PARENT_NODE connections are acceptable
+□ Direct parent node connections are acceptable
 □ All category names describe business functions/workflows
 □ Optional: Entity renames improve clarity and organization
 
@@ -428,6 +434,7 @@ PROMPTS["hierarchical_grouping_examples"] = [
 Max_categories: 3  
 Domain_context: Authentication and security workflows detected  
 Available Entity Types: organization, person, team, project, document, product, event, task, location, technology, customer  
+Parent Node: Authentication System
 
 ENTITIES TO GROUP:  
 Entity 1: aadhaar (Type: technology) - Authentication system used for KYC verification processes  
@@ -447,8 +454,8 @@ Output:
 ("new_edge"{tuple_delimiter}"kyc process"{tuple_delimiter}"Identity Verification Pipeline"{tuple_delimiter}"Primary business process within the identity verification workflow"{tuple_delimiter}"business process, compliance workflow"{tuple_delimiter}9){record_delimiter}  
 ("new_edge"{tuple_delimiter}"aadhaar_api_timeout_events"{tuple_delimiter}"System Operations Hub"{tuple_delimiter}"Critical system event that requires monitoring and operational response"{tuple_delimiter}"system monitoring, operational response"{tuple_delimiter}8){record_delimiter}  
 ("new_edge"{tuple_delimiter}"certificate validation"{tuple_delimiter}"System Operations Hub"{tuple_delimiter}"Security validation process that requires operational monitoring"{tuple_delimiter}"security validation, operational monitoring"{tuple_delimiter}8){record_delimiter}  
-("new_edge"{tuple_delimiter}"legacy system"{tuple_delimiter}"PARENT_NODE"{tuple_delimiter}"Legacy technology that doesn't fit well into current functional workflows - acceptable direct connection"{tuple_delimiter}"legacy integration, direct connection"{tuple_delimiter}6){record_delimiter}  
-("new_edge"{tuple_delimiter}"compliance officer"{tuple_delimiter}"PARENT_NODE"{tuple_delimiter}"Oversight role that spans multiple functional areas - acceptable direct connection"{tuple_delimiter}"oversight, multi-domain responsibility"{tuple_delimiter}7){record_delimiter}  
+("new_edge"{tuple_delimiter}"legacy system"{tuple_delimiter}"Authentication System"{tuple_delimiter}"Legacy technology that doesn't fit well into current functional workflows - acceptable direct connection"{tuple_delimiter}"legacy integration, direct connection"{tuple_delimiter}6){record_delimiter}  
+("new_edge"{tuple_delimiter}"compliance officer"{tuple_delimiter}"Authentication System"{tuple_delimiter}"Oversight role that spans multiple functional areas - acceptable direct connection"{tuple_delimiter}"oversight, multi-domain responsibility"{tuple_delimiter}7){record_delimiter}  
 ("major_category"{tuple_delimiter}"Identity Verification Pipeline"{tuple_delimiter}"Primary business workflow that delivers core authentication services to customers"){completion_delimiter}  
 #############################""",
     
@@ -481,6 +488,7 @@ Output:
 Max_categories: 2
 Domain_context: E-commerce and transaction processing workflows detected
 Available Entity Types: organization, person, team, project, document, product, event, task, location, technology, customer
+Parent Node: E-commerce Platform
 
 ENTITIES TO GROUP:
 Entity 1: payment gateway (Type: technology) - System processing customer payments and transactions
@@ -498,7 +506,7 @@ Output:
 ("new_edge"{tuple_delimiter}"order fulfillment"{tuple_delimiter}"Order Management Pipeline"{tuple_delimiter}"Core fulfillment process that delivers products to customers"{tuple_delimiter}"order processing, fulfillment operations"{tuple_delimiter}9){record_delimiter}
 ("new_edge"{tuple_delimiter}"customer account"{tuple_delimiter}"Order Management Pipeline"{tuple_delimiter}"Customer management system that tracks order history and user profiles"{tuple_delimiter}"customer management, order tracking"{tuple_delimiter}8){record_delimiter}
 ("new_edge"{tuple_delimiter}"shipping documentation"{tuple_delimiter}"Order Management Pipeline"{tuple_delimiter}"Required documentation for order processing and shipping workflow"{tuple_delimiter}"shipping documents, order processing"{tuple_delimiter}7){record_delimiter}
-("new_edge"{tuple_delimiter}"e_commerce_customers"{tuple_delimiter}"PARENT_NODE"{tuple_delimiter}"Customer base that spans multiple functional workflows - direct parent connection"{tuple_delimiter}"customer management, multi-workflow"{tuple_delimiter}6){record_delimiter}
+("new_edge"{tuple_delimiter}"e_commerce_customers"{tuple_delimiter}"E-commerce Platform"{tuple_delimiter}"Customer base that spans multiple functional workflows - direct parent connection"{tuple_delimiter}"customer management, multi-workflow"{tuple_delimiter}6){record_delimiter}
 ("major_category"{tuple_delimiter}"Order Management Pipeline"{tuple_delimiter}"Primary customer-facing workflow that delivers products and drives revenue"){completion_delimiter}
 #############################""",
 
@@ -507,6 +515,7 @@ Output:
 Max_categories: 2
 Domain_context: Office management and corporate events workflows detected
 Available Entity Types: organization, person, team, project, document, product, event, task, location, technology, customer
+Parent Node: Corporate Management
 
 ENTITIES TO GROUP:
 Entity 1: quarterly meeting (Type: event) - Regular corporate meeting for business reviews
@@ -526,7 +535,7 @@ Output:
 ("new_edge"{tuple_delimiter}"quarterly meeting"{tuple_delimiter}"Business Events & Training Center"{tuple_delimiter}"Regular corporate event coordinated by business events project"{tuple_delimiter}"event coordination, business meetings"{tuple_delimiter}9){record_delimiter}
 ("new_edge"{tuple_delimiter}"product launch"{tuple_delimiter}"Business Events & Training Center"{tuple_delimiter}"Major business event managed by events and training coordination"{tuple_delimiter}"event coordination, product management"{tuple_delimiter}9){record_delimiter}
 ("new_edge"{tuple_delimiter}"training program"{tuple_delimiter}"Business Events & Training Center"{tuple_delimiter}"Employee development project that fits directly into training center operations"{tuple_delimiter}"training coordination, employee development"{tuple_delimiter}9){record_delimiter}
-("new_edge"{tuple_delimiter}"marketing team"{tuple_delimiter}"PARENT_NODE"{tuple_delimiter}"Cross-functional team that works with multiple operational areas - direct parent connection"{tuple_delimiter}"cross-functional, team coordination"{tuple_delimiter}6){record_delimiter}
+("new_edge"{tuple_delimiter}"marketing team"{tuple_delimiter}"Corporate Management"{tuple_delimiter}"Cross-functional team that works with multiple operational areas - direct parent connection"{tuple_delimiter}"cross-functional, team coordination"{tuple_delimiter}6){record_delimiter}
 ("major_category"{tuple_delimiter}"Business Events & Training Center"{tuple_delimiter}"Strategic business coordination that drives company growth and employee development"){completion_delimiter}
 #############################""",
 ]

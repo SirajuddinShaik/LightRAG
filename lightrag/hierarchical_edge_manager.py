@@ -282,12 +282,32 @@ Subcategories:
         entity1_data: Dict[str, Any], 
         entity2_data: Dict[str, Any]
     ) -> float:
-        """Calculate similarity between two entities based on subcategories and descriptions."""
+        """Calculate comprehensive similarity between two entities using all available data and embeddings."""
         
         try:
-            # Get subcategories
-            cat1 = set(entity1_data.get("subcategories", []))
-            cat2 = set(entity2_data.get("subcategories", []))
+            # 1. Get subcategories
+            cat1 = set()
+            cat2 = set()
+            
+            subcats1 = entity1_data.get("subcategories", [])
+            if isinstance(subcats1, str):
+                try:
+                    import json
+                    subcats1 = json.loads(subcats1)
+                except:
+                    subcats1 = [subcats1] if subcats1 else []
+            if isinstance(subcats1, list):
+                cat1 = set(cat.lower() for cat in subcats1)
+                
+            subcats2 = entity2_data.get("subcategories", [])
+            if isinstance(subcats2, str):
+                try:
+                    import json
+                    subcats2 = json.loads(subcats2)
+                except:
+                    subcats2 = [subcats2] if subcats2 else []
+            if isinstance(subcats2, list):
+                cat2 = set(cat.lower() for cat in subcats2)
             
             # Calculate Jaccard similarity for subcategories
             if cat1 or cat2:
@@ -297,12 +317,12 @@ Subcategories:
             else:
                 category_similarity = 0.0
             
-            # Calculate entity type similarity
+            # 2. Calculate entity type similarity
             type1 = entity1_data.get("entity_type", "").lower()
             type2 = entity2_data.get("entity_type", "").lower()
             type_similarity = 1.0 if type1 == type2 else 0.0
             
-            # Calculate description similarity using simple keyword overlap
+            # 3. Calculate description similarity using word overlap
             desc1_words = set(entity1_data.get("description", "").lower().split())
             desc2_words = set(entity2_data.get("description", "").lower().split())
             
@@ -313,18 +333,200 @@ Subcategories:
             else:
                 desc_similarity = 0.0
             
-            # Weighted combination
+            # 4. Calculate keywords similarity (if available)
+            keywords1 = set()
+            keywords2 = set()
+            
+            # Check for keywords field in entity data
+            if "keywords" in entity1_data:
+                keywords1 = set(entity1_data.get("keywords", "").lower().split(","))
+                keywords1 = {k.strip() for k in keywords1 if k.strip()}
+                
+            if "keywords" in entity2_data:
+                keywords2 = set(entity2_data.get("keywords", "").lower().split(","))
+                keywords2 = {k.strip() for k in keywords2 if k.strip()}
+            
+            if keywords1 or keywords2:
+                keyword_intersection = len(keywords1.intersection(keywords2))
+                keyword_union = len(keywords1.union(keywords2))
+                keyword_similarity = keyword_intersection / keyword_union if keyword_union > 0 else 0.0
+            else:
+                keyword_similarity = 0.0
+            
+            # 5. Calculate entity name similarity (for related naming patterns)
+            name1 = entity1_data.get("entity_id", entity1_data.get("entity_name", "")).lower()
+            name2 = entity2_data.get("entity_id", entity2_data.get("entity_name", "")).lower()
+            
+            name1_words = set(name1.split())
+            name2_words = set(name2.split())
+            
+            if name1_words or name2_words:
+                name_intersection = len(name1_words.intersection(name2_words))
+                name_union = len(name1_words.union(name2_words))
+                name_similarity = name_intersection / name_union if name_union > 0 else 0.0
+            else:
+                name_similarity = 0.0
+            
+            # 6. Calculate source/context similarity (if available)
+            source1 = entity1_data.get("source_id", "").lower()
+            source2 = entity2_data.get("source_id", "").lower()
+            
+            if source1 and source2:
+                source_similarity = 1.0 if source1 == source2 else 0.0
+            else:
+                source_similarity = 0.0
+            
+            # 7. Calculate comprehensive text similarity (all text fields combined)
+            all_text1 = " ".join([
+                entity1_data.get("description", ""),
+                entity1_data.get("keywords", ""),
+                name1,
+                " ".join(cat1) if cat1 else ""
+            ]).lower()
+            
+            all_text2 = " ".join([
+                entity2_data.get("description", ""),
+                entity2_data.get("keywords", ""),
+                name2,
+                " ".join(cat2) if cat2 else ""
+            ]).lower()
+            
+            all_words1 = set(all_text1.split())
+            all_words2 = set(all_text2.split())
+            
+            if all_words1 or all_words2:
+                text_intersection = len(all_words1.intersection(all_words2))
+                text_union = len(all_words1.union(all_words2))
+                comprehensive_text_similarity = text_intersection / text_union if text_union > 0 else 0.0
+            else:
+                comprehensive_text_similarity = 0.0
+            
+            # 8. Calculate embedding-based semantic similarity
+            embedding_similarity = await self._calculate_embedding_similarity(entity1_data, entity2_data)
+            
+            # Weighted combination of all similarity measures with embedding similarity
             final_similarity = (
-                0.5 * category_similarity + 
-                0.3 * type_similarity + 
-                0.2 * desc_similarity
+                0.20 * category_similarity +          # Subcategories are very important
+                0.15 * type_similarity +              # Entity type is important
+                0.15 * desc_similarity +              # Description similarity
+                0.15 * keyword_similarity +           # Keywords if available
+                0.15 * embedding_similarity +         # Semantic embedding similarity
+                0.10 * comprehensive_text_similarity + # Overall text similarity
+                0.05 * name_similarity +              # Entity name patterns
+                0.05 * source_similarity              # Source context
             )
+            
+            logger.debug(f"Comprehensive similarity breakdown:")
+            logger.debug(f"  - Categories: {category_similarity:.3f}")
+            logger.debug(f"  - Type: {type_similarity:.3f}")  
+            logger.debug(f"  - Description: {desc_similarity:.3f}")
+            logger.debug(f"  - Keywords: {keyword_similarity:.3f}")
+            logger.debug(f"  - Embeddings: {embedding_similarity:.3f}")
+            logger.debug(f"  - Names: {name_similarity:.3f}")
+            logger.debug(f"  - Source: {source_similarity:.3f}")
+            logger.debug(f"  - Overall text: {comprehensive_text_similarity:.3f}")
+            logger.debug(f"  - Final: {final_similarity:.3f}")
             
             return final_similarity
             
         except Exception as e:
-            logger.error(f"Error calculating similarity: {e}")
+            logger.error(f"Error calculating comprehensive similarity: {e}")
             return 0.0
+    
+    async def _calculate_embedding_similarity(
+        self,
+        entity1_data: Dict[str, Any],
+        entity2_data: Dict[str, Any]
+    ) -> float:
+        """Calculate semantic similarity using embedding functions."""
+        try:
+            # Get embedding function from global config
+            embedding_func = self.global_config.get("embedding_func")
+            if not embedding_func:
+                logger.debug("No embedding function available, skipping embedding similarity")
+                return 0.0
+            
+            # Prepare text content for both entities
+            entity1_content = self._prepare_entity_content_for_embedding(entity1_data)
+            entity2_content = self._prepare_entity_content_for_embedding(entity2_data)
+            
+            if not entity1_content.strip() or not entity2_content.strip():
+                logger.debug("Empty content for embedding similarity calculation")
+                return 0.0
+            
+            # Get embeddings for both entities
+            embeddings = await embedding_func([entity1_content, entity2_content])
+            
+            if embeddings is None or len(embeddings) < 2:
+                logger.debug("Failed to get embeddings")
+                return 0.0
+            
+            # Calculate cosine similarity between embeddings
+            import numpy as np
+            
+            emb1 = np.array(embeddings[0])
+            emb2 = np.array(embeddings[1])
+            
+            # Normalize vectors
+            emb1_norm = emb1 / (np.linalg.norm(emb1) + 1e-10)
+            emb2_norm = emb2 / (np.linalg.norm(emb2) + 1e-10)
+            
+            # Calculate cosine similarity
+            cosine_sim = np.dot(emb1_norm, emb2_norm)
+            
+            # Ensure similarity is between 0 and 1
+            similarity = max(0.0, min(1.0, (cosine_sim + 1.0) / 2.0))
+            
+            logger.debug(f"Embedding similarity: {similarity:.3f}")
+            return similarity
+            
+        except Exception as e:
+            logger.error(f"Error calculating embedding similarity: {e}")
+            return 0.0
+    
+    def _prepare_entity_content_for_embedding(self, entity_data: Dict[str, Any]) -> str:
+        """Prepare entity content for embedding calculation."""
+        try:
+            content_parts = []
+            
+            # Add entity name/id
+            name = entity_data.get("entity_id", entity_data.get("entity_name", ""))
+            if name:
+                content_parts.append(name)
+            
+            # Add entity type
+            entity_type = entity_data.get("entity_type", "")
+            if entity_type:
+                content_parts.append(entity_type)
+            
+            # Add description
+            description = entity_data.get("description", "")
+            if description:
+                content_parts.append(description)
+            
+            # Add keywords
+            keywords = entity_data.get("keywords", "")
+            if keywords:
+                content_parts.append(keywords)
+            
+            # Add subcategories
+            subcats = entity_data.get("subcategories", [])
+            if isinstance(subcats, str):
+                try:
+                    import json
+                    subcats = json.loads(subcats)
+                except:
+                    subcats = [subcats] if subcats else []
+            
+            if isinstance(subcats, list) and subcats:
+                content_parts.append(" ".join(subcats))
+            
+            # Join all parts with spaces
+            return " ".join(content_parts).strip()
+            
+        except Exception as e:
+            logger.error(f"Error preparing entity content for embedding: {e}")
+            return ""
     
     async def trigger_hierarchical_splitting(
         self, 
@@ -458,6 +660,7 @@ Subcategories:
                 "entity_type_analysis": f"Total entities: {len(connected_entities)}",
                 "total_entities": len(connected_entities),  # Add the missing total_entities key
                 "domain_context": f"Parent node: {parent_node_id} ({parent_data.get('entity_type', 'UNKNOWN')})",
+                "parent_node_name": parent_node_id,  # Add the missing parent_node_name key
                 "examples": PROMPTS.get("hierarchical_grouping_examples", [""])[0] if PROMPTS.get("hierarchical_grouping_examples") else "",
                 "max_groups": min(3, max(2, len(connected_entities) // 10)),  # Dynamic grouping
                 "entities_list": entities_list,
@@ -849,6 +1052,660 @@ Subcategories:
         
         return list(set(subcategories))  # Remove duplicates
     
+    async def _bidirectional_smart_routing(
+        self,
+        source_node_id: str,
+        target_node_id: str,
+        source_node_data: Dict[str, Any],
+        target_node_data: Dict[str, Any],
+        edge_data: Dict[str, Any]
+    ) -> bool:
+        """
+        Perform bidirectional smart routing as per user requirements:
+        
+        1 edge = 2 entities(A+B) + relation
+        Direction 1: Compare (relation + B) against [A and all its subsets]
+        Direction 2: Compare (relation + A) against [B and all subcategories]
+        Select the best entity recursively
+        """
+        try:
+            logger.debug(f"Starting bidirectional analysis for {source_node_id} -> {target_node_id}")
+            
+            # Direction 1: Compare (relation + target) against [source + all its subsets]
+            direction1_best = await self._compare_relation_with_entity_subsets(
+                edge_data, target_node_data, source_node_id, source_node_data, "direction1"
+            )
+            
+            # Direction 2: Compare (relation + source) against [target + all its subcategories]  
+            direction2_best = await self._compare_relation_with_entity_subsets(
+                edge_data, source_node_data, target_node_id, target_node_data, "direction2"
+            )
+            
+            # Select the best entity recursively based on both directions
+            final_choice = await self._select_best_entity_recursively(
+                source_node_id, target_node_id, 
+                direction1_best, direction2_best, 
+                edge_data
+            )
+            
+            # Execute the final routing decision
+            final_source, final_target = final_choice
+            await self.knowledge_graph_inst.upsert_edge(final_source, final_target, edge_data)
+            
+            if final_source != source_node_id or final_target != target_node_id:
+                logger.info(f"Bidirectional routing: Rerouted {source_node_id} -> {target_node_id} to {final_source} -> {final_target}")
+            else:
+                logger.info(f"Bidirectional routing: Using original routing {source_node_id} -> {target_node_id}")
+            
+            return True
+                
+        except Exception as e:
+            logger.error(f"Error in bidirectional smart routing: {e}")
+            # Fallback to original routing
+            await self.knowledge_graph_inst.upsert_edge(source_node_id, target_node_id, edge_data)
+            return True
+    
+    async def _find_best_entity_match(
+        self,
+        entity_name: str,
+        edge_data: Dict[str, Any],
+        entity_role: str,  # "source" or "target"
+        default_match: str
+    ) -> str:
+        """
+        Find the best matching entity for a given edge based on compatibility.
+        
+        Args:
+            entity_name: The entity we're trying to match
+            edge_data: The edge data containing keywords and description
+            entity_role: Whether this entity is the "source" or "target" of the edge
+            default_match: Default entity to return if no better match found
+            
+        Returns:
+            str: The best matching entity name
+        """
+        try:
+            # Get all existing entities
+            all_nodes = await self.knowledge_graph_inst.get_all_nodes()
+            if not all_nodes:
+                return default_match
+            
+            best_match = default_match
+            best_score = 0.0
+            
+            # Create a virtual entity data for the new entity based on edge information
+            virtual_entity_data = {
+                "entity_name": entity_name,
+                "entity_type": "UNKNOWN",  # Will be inferred from edge
+                "description": edge_data.get("description", ""),
+                "subcategories": await self._infer_subcategories_from_edge(edge_data, entity_role)
+            }
+            
+            # Check compatibility with existing entities
+            for node_id, node_data in all_nodes.items():
+                if node_id == entity_name:  # Skip self
+                    continue
+                    
+                # Skip if this node already has too many edges
+                if await self.check_edge_limit(node_id):
+                    continue
+                
+                # Calculate compatibility score
+                compatibility_score = await self._calculate_entity_compatibility(
+                    virtual_entity_data, node_data, edge_data, entity_role
+                )
+                
+                if compatibility_score > best_score:
+                    best_score = compatibility_score
+                    best_match = node_id
+            
+            # Only return alternative if it's significantly better
+            if best_score > 0.2:  # Minimum threshold for routing
+                logger.debug(f"Found better match for {entity_name}: {best_match} (score: {best_score:.3f})")
+                return best_match
+            else:
+                return default_match
+                
+        except Exception as e:
+            logger.error(f"Error finding best entity match: {e}")
+            return default_match
+    
+    async def _calculate_edge_entity_compatibility(
+        self,
+        edge_data: Dict[str, Any],
+        entity_data: Dict[str, Any],
+        entity_role: str
+    ) -> float:
+        """
+        Calculate how compatible an edge is with a specific entity.
+        
+        Args:
+            edge_data: Edge information (keywords, description)
+            entity_data: Entity information (type, description, subcategories)
+            entity_role: "source" or "target" - role of entity in the edge
+            
+        Returns:
+            float: Compatibility score between 0.0 and 1.0
+        """
+        try:
+            # Extract edge keywords and description
+            edge_keywords = set(edge_data.get("keywords", "").lower().split())
+            edge_description = edge_data.get("description", "").lower()
+            
+            # Extract entity information
+            entity_type = entity_data.get("entity_type", "").lower()
+            entity_description = entity_data.get("description", "").lower()
+            entity_subcategories = set()
+            
+            # Handle subcategories (could be JSON string or list)
+            subcats = entity_data.get("subcategories", [])
+            if isinstance(subcats, str):
+                try:
+                    import json
+                    subcats = json.loads(subcats)
+                except:
+                    subcats = [subcats] if subcats else []
+            
+            if isinstance(subcats, list):
+                entity_subcategories = set(cat.lower() for cat in subcats)
+            
+            # Calculate different compatibility aspects
+            
+            # 1. Keyword overlap with entity description
+            entity_words = set(entity_description.split())
+            keyword_overlap = len(edge_keywords.intersection(entity_words))
+            keyword_score = keyword_overlap / max(len(edge_keywords), 1)
+            
+            # 2. Subcategory relevance
+            edge_words = set(edge_description.split())
+            subcategory_overlap = len(entity_subcategories.intersection(edge_words))
+            subcategory_score = subcategory_overlap / max(len(entity_subcategories), 1)
+            
+            # 3. Entity type relevance to edge role
+            role_score = self._calculate_role_compatibility(entity_type, edge_data, entity_role)
+            
+            # 4. Description semantic similarity (simple word overlap)
+            desc_words = set(entity_description.split())
+            edge_desc_words = set(edge_description.split())
+            desc_overlap = len(desc_words.intersection(edge_desc_words))
+            desc_score = desc_overlap / max(len(desc_words.union(edge_desc_words)), 1)
+            
+            # Weighted combination
+            final_score = (
+                0.3 * keyword_score +
+                0.25 * subcategory_score +
+                0.25 * role_score +
+                0.2 * desc_score
+            )
+            
+            return min(final_score, 1.0)
+            
+        except Exception as e:
+            logger.error(f"Error calculating edge-entity compatibility: {e}")
+            return 0.0
+    
+    def _calculate_role_compatibility(
+        self,
+        entity_type: str,
+        edge_data: Dict[str, Any],
+        entity_role: str
+    ) -> float:
+        """
+        Calculate how well an entity type fits a specific role in an edge.
+        """
+        edge_keywords = edge_data.get("keywords", "").lower()
+        edge_description = edge_data.get("description", "").lower()
+        
+        # Define role compatibility rules
+        if entity_role == "source":
+            # Source entities are typically actors, systems, or initiators
+            if entity_type in ["person", "user", "system", "service", "organization"]:
+                if any(word in edge_keywords + edge_description for word in ["manage", "control", "create", "initiate", "send"]):
+                    return 0.8
+                return 0.6
+            elif entity_type in ["technology", "tool", "application"]:
+                if any(word in edge_keywords + edge_description for word in ["process", "execute", "run", "operate"]):
+                    return 0.7
+                return 0.5
+        
+        elif entity_role == "target":
+            # Target entities are typically objects, recipients, or results
+            if entity_type in ["document", "data", "product", "result", "output"]:
+                if any(word in edge_keywords + edge_description for word in ["receive", "store", "contain", "produce"]):
+                    return 0.8
+                return 0.6
+            elif entity_type in ["person", "user", "customer"]:
+                if any(word in edge_keywords + edge_description for word in ["notify", "inform", "deliver", "provide"]):
+                    return 0.7
+                return 0.5
+        
+        return 0.4  # Default moderate compatibility
+    
+    async def _calculate_entity_compatibility(
+        self,
+        entity1_data: Dict[str, Any],
+        entity2_data: Dict[str, Any],
+        edge_data: Dict[str, Any],
+        entity_role: str
+    ) -> float:
+        """
+        Calculate overall compatibility between two entities for a specific edge.
+        """
+        try:
+            # Base similarity between entities
+            entity_similarity = await self._calculate_similarity(entity1_data, entity2_data)
+            
+            # Edge compatibility with the existing entity
+            edge_compatibility = await self._calculate_edge_entity_compatibility(
+                edge_data, entity2_data, entity_role
+            )
+            
+            # Combined score with emphasis on edge compatibility
+            combined_score = 0.4 * entity_similarity + 0.6 * edge_compatibility
+            
+            return combined_score
+            
+        except Exception as e:
+            logger.error(f"Error calculating entity compatibility: {e}")
+            return 0.0
+    
+    async def _infer_subcategories_from_edge(
+        self,
+        edge_data: Dict[str, Any],
+        entity_role: str
+    ) -> List[str]:
+        """
+        Infer likely subcategories for an entity based on edge information.
+        """
+        try:
+            keywords = edge_data.get("keywords", "").lower()
+            description = edge_data.get("description", "").lower()
+            combined_text = f"{keywords} {description}"
+            
+            subcategories = []
+            
+            # Infer based on common patterns
+            if any(word in combined_text for word in ["auth", "login", "security", "verify"]):
+                subcategories.append("authentication")
+            
+            if any(word in combined_text for word in ["data", "information", "store", "database"]):
+                subcategories.append("data_management")
+            
+            if any(word in combined_text for word in ["user", "customer", "client", "person"]):
+                subcategories.append("user_interaction")
+            
+            if any(word in combined_text for word in ["process", "workflow", "execute", "run"]):
+                subcategories.append("process_management")
+            
+            if any(word in combined_text for word in ["system", "service", "application", "technology"]):
+                subcategories.append("system_component")
+            
+            # Role-specific subcategories
+            if entity_role == "source":
+                if any(word in combined_text for word in ["manage", "control", "initiate"]):
+                    subcategories.append("management_entity")
+            elif entity_role == "target":
+                if any(word in combined_text for word in ["receive", "store", "contain"]):
+                    subcategories.append("storage_entity")
+            
+            return subcategories if subcategories else ["general"]
+            
+        except Exception as e:
+            logger.error(f"Error inferring subcategories from edge: {e}")
+            return ["general"]
+    
+    async def _compare_relation_with_entity_subsets(
+        self,
+        edge_data: Dict[str, Any],
+        relation_entity_data: Dict[str, Any],
+        comparison_entity_id: str,
+        comparison_entity_data: Dict[str, Any],
+        direction: str
+    ) -> Tuple[str, float]:
+        """
+        Compare (relation + entity) against [comparison_entity + all its subsets/subcategories]
+        
+        Args:
+            edge_data: The relation/edge information
+            relation_entity_data: Data of the entity being combined with relation
+            comparison_entity_id: ID of the entity to compare against
+            comparison_entity_data: Data of the entity to compare against
+            direction: "direction1" or "direction2" for logging
+            
+        Returns:
+            Tuple of (best_entity_id, best_score)
+        """
+        try:
+            logger.debug(f"Comparing relation+entity in {direction}")
+            
+            # Create combined relation+entity profile
+            relation_profile = await self._create_relation_entity_profile(edge_data, relation_entity_data)
+            
+            # Get all possible entities to compare against (including subsets/subcategories)
+            candidate_entities = await self._get_entity_subsets_and_subcategories(
+                comparison_entity_id, comparison_entity_data
+            )
+            
+            best_entity = comparison_entity_id
+            best_score = 0.0
+            
+            # Compare against each candidate
+            for entity_id, entity_data in candidate_entities.items():
+                score = await self._calculate_relation_entity_compatibility(
+                    relation_profile, entity_data
+                )
+                
+                logger.debug(f"{direction}: {entity_id} compatibility score: {score:.3f}")
+                
+                if score > best_score:
+                    best_score = score
+                    best_entity = entity_id
+            
+            logger.debug(f"{direction} best match: {best_entity} (score: {best_score:.3f})")
+            return best_entity, best_score
+            
+        except Exception as e:
+            logger.error(f"Error in {direction} comparison: {e}")
+            return comparison_entity_id, 0.0
+    
+    async def _create_relation_entity_profile(
+        self,
+        edge_data: Dict[str, Any],
+        entity_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Create a combined profile of relation + entity for comparison"""
+        try:
+            # Extract edge characteristics
+            edge_keywords = set(edge_data.get("keywords", "").lower().split())
+            edge_description = edge_data.get("description", "").lower()
+            edge_words = set(edge_description.split())
+            
+            # Extract entity characteristics
+            entity_type = entity_data.get("entity_type", "").lower()
+            entity_description = entity_data.get("description", "").lower()
+            entity_words = set(entity_description.split())
+            
+            # Get entity subcategories
+            entity_subcategories = set()
+            subcats = entity_data.get("subcategories", [])
+            if isinstance(subcats, str):
+                try:
+                    import json
+                    subcats = json.loads(subcats)
+                except:
+                    subcats = [subcats] if subcats else []
+            
+            if isinstance(subcats, list):
+                entity_subcategories = set(cat.lower() for cat in subcats)
+            
+            # Create combined profile
+            combined_profile = {
+                "keywords": edge_keywords.union(entity_words),
+                "description_words": edge_words.union(entity_words),
+                "entity_type": entity_type,
+                "subcategories": entity_subcategories,
+                "combined_description": f"{edge_description} {entity_description}",
+                "weight": edge_data.get("weight", 1.0)
+            }
+            
+            return combined_profile
+            
+        except Exception as e:
+            logger.error(f"Error creating relation-entity profile: {e}")
+            return {}
+    
+    async def _get_entity_subsets_and_subcategories(
+        self,
+        entity_id: str,
+        entity_data: Dict[str, Any]
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Get all entities that represent subsets/subcategories of the given entity
+        This includes the entity itself plus related entities
+        """
+        try:
+            candidates = {entity_id: entity_data}
+            
+            # Get all nodes to find related entities
+            all_nodes = await self.knowledge_graph_inst.get_all_nodes()
+            if not all_nodes:
+                return candidates
+            
+            # Extract entity characteristics for comparison safely
+            entity_type = entity_data.get("entity_type", "").lower() if entity_data else ""
+            entity_subcategories = set()
+            
+            if entity_data:
+                subcats = entity_data.get("subcategories", [])
+                if isinstance(subcats, str):
+                    try:
+                        import json
+                        subcats = json.loads(subcats)
+                    except:
+                        subcats = [subcats] if subcats else []
+                
+                if isinstance(subcats, list):
+                    entity_subcategories = set(cat.lower() for cat in subcats if isinstance(cat, str))
+            
+            # Handle multiple possible formats from get_all_nodes()
+            nodes_iterator = []
+            
+            if isinstance(all_nodes, dict):
+                # all_nodes is a dictionary {node_id: node_data}
+                for node_id, node_data in all_nodes.items():
+                    if node_id != entity_id and node_data is not None:
+                        nodes_iterator.append((node_id, node_data))
+                        
+            elif isinstance(all_nodes, list):
+                # all_nodes is a list of node_ids, need to fetch node data
+                for node_id in all_nodes:
+                    if isinstance(node_id, str) and node_id != entity_id:
+                        try:
+                            node_data = await self.knowledge_graph_inst.get_node(node_id)
+                            if node_data and isinstance(node_data, dict):
+                                nodes_iterator.append((node_id, node_data))
+                        except Exception as e:
+                            logger.debug(f"Could not fetch node data for {node_id}: {e}")
+                            continue
+                            
+            elif hasattr(all_nodes, '__iter__'):
+                # Handle other iterable types
+                try:
+                    for item in all_nodes:
+                        if isinstance(item, dict) and "id" in item:
+                            # Handle case where all_nodes contains node objects with 'id' field
+                            node_id = item.get("id")
+                            if node_id and node_id != entity_id:
+                                nodes_iterator.append((node_id, item))
+                        elif isinstance(item, str) and item != entity_id:
+                            # Handle case where all_nodes is a list of node_ids
+                            try:
+                                node_data = await self.knowledge_graph_inst.get_node(item)
+                                if node_data and isinstance(node_data, dict):
+                                    nodes_iterator.append((item, node_data))
+                            except Exception as e:
+                                logger.debug(f"Could not fetch node data for {item}: {e}")
+                                continue
+                except Exception as e:
+                    logger.debug(f"Error iterating over all_nodes: {e}")
+            else:
+                logger.warning(f"Unexpected format for all_nodes: {type(all_nodes)}")
+                return candidates
+            
+            # Find related entities (same type or overlapping subcategories)
+            for node_id, node_data in nodes_iterator:
+                try:
+                    if not node_data or not isinstance(node_data, dict):
+                        continue
+                        
+                    # Safely extract node characteristics
+                    node_type = node_data.get("entity_type", "").lower()
+                    node_subcategories = set()
+                    
+                    node_subcats = node_data.get("subcategories", [])
+                    if isinstance(node_subcats, str):
+                        try:
+                            import json
+                            node_subcats = json.loads(node_subcats)
+                        except:
+                            node_subcats = [node_subcats] if node_subcats else []
+                    
+                    if isinstance(node_subcats, list):
+                        node_subcategories = set(cat.lower() for cat in node_subcats if isinstance(cat, str))
+                    
+                    # Include if same type or has overlapping subcategories
+                    if (node_type and entity_type and node_type == entity_type) or \
+                       (entity_subcategories and node_subcategories and 
+                        len(entity_subcategories.intersection(node_subcategories)) > 0):
+                        candidates[node_id] = node_data
+                        
+                except Exception as e:
+                    logger.debug(f"Error processing node {node_id}: {e}")
+                    continue
+            
+            logger.debug(f"Found {len(candidates)} candidate entities for {entity_id}")
+            return candidates
+            
+        except Exception as e:
+            logger.error(f"Error getting entity subsets: {e}")
+            return {entity_id: entity_data}
+    
+    async def _calculate_relation_entity_compatibility(
+        self,
+        relation_profile: Dict[str, Any],
+        entity_data: Dict[str, Any]
+    ) -> float:
+        """Calculate compatibility between relation+entity profile and target entity"""
+        try:
+            # Extract target entity characteristics
+            target_type = entity_data.get("entity_type", "").lower()
+            target_description = entity_data.get("description", "").lower()
+            target_words = set(target_description.split())
+            
+            target_subcategories = set()
+            subcats = entity_data.get("subcategories", [])
+            if isinstance(subcats, str):
+                try:
+                    import json
+                    subcats = json.loads(subcats)
+                except:
+                    subcats = [subcats] if subcats else []
+            
+            if isinstance(subcats, list):
+                target_subcategories = set(cat.lower() for cat in subcats)
+            
+            # Calculate compatibility scores
+            
+            # 1. Keyword/description overlap
+            profile_words = relation_profile.get("description_words", set())
+            word_overlap = len(profile_words.intersection(target_words))
+            word_score = word_overlap / max(len(profile_words.union(target_words)), 1)
+            
+            # 2. Subcategory overlap
+            profile_subcats = relation_profile.get("subcategories", set())
+            subcat_overlap = len(profile_subcats.intersection(target_subcategories))
+            subcat_score = subcat_overlap / max(len(profile_subcats.union(target_subcategories)), 1)
+            
+            # 3. Entity type compatibility
+            profile_type = relation_profile.get("entity_type", "")
+            type_score = 1.0 if profile_type == target_type else 0.5
+            
+            # 4. Semantic similarity based on keywords
+            profile_keywords = relation_profile.get("keywords", set())
+            keyword_overlap = len(profile_keywords.intersection(target_words))
+            keyword_score = keyword_overlap / max(len(profile_keywords), 1)
+            
+            # Weighted combination
+            final_score = (
+                0.3 * word_score +
+                0.3 * subcat_score +
+                0.2 * type_score +
+                0.2 * keyword_score
+            )
+            
+            return min(final_score, 1.0)
+            
+        except Exception as e:
+            logger.error(f"Error calculating relation-entity compatibility: {e}")
+            return 0.0
+    
+    async def _select_best_entity_recursively(
+        self,
+        original_source: str,
+        original_target: str,
+        direction1_result: Tuple[str, float],
+        direction2_result: Tuple[str, float],
+        edge_data: Dict[str, Any]
+    ) -> Tuple[str, str]:
+        """
+        Recursively select the best entity based on both direction results
+        
+        Direction 1: Compare (relation + target) against [source + subsets] -> finds best source
+        Direction 2: Compare (relation + source) against [target + subcategories] -> finds best target
+        
+        Args:
+            original_source: Original source entity
+            original_target: Original target entity  
+            direction1_result: (best_source_alternative, score) from direction 1
+            direction2_result: (best_target_alternative, score) from direction 2
+            edge_data: Edge data for additional context
+            
+        Returns:
+            Tuple of (final_source, final_target)
+        """
+        try:
+            direction1_source_alternative, direction1_score = direction1_result
+            direction2_target_alternative, direction2_score = direction2_result
+            
+            logger.debug(f"Recursive selection: D1 source alt({direction1_source_alternative}:{direction1_score:.3f}) vs D2 target alt({direction2_target_alternative}:{direction2_score:.3f})")
+            
+            # Minimum improvement threshold to justify routing change
+            improvement_threshold = 0.15
+            
+            # Check if either direction found a significantly better match
+            if direction1_score > direction2_score + improvement_threshold:
+                # Direction 1 found better source alternative
+                if direction1_source_alternative != original_source:
+                    logger.info(f"Recursive selection: Using D1 source rerouting {original_source} -> {direction1_source_alternative}")
+                    return direction1_source_alternative, original_target
+                else:
+                    logger.debug("Direction 1 best match is original source")
+                    
+            elif direction2_score > direction1_score + improvement_threshold:
+                # Direction 2 found better target alternative  
+                if direction2_target_alternative != original_target:
+                    logger.info(f"Recursive selection: Using D2 target rerouting {original_target} -> {direction2_target_alternative}")
+                    return original_source, direction2_target_alternative
+                else:
+                    logger.debug("Direction 2 best match is original target")
+            
+            # If both directions found good improvements, choose the higher scoring one
+            elif (direction1_score > 0.3 and direction2_score > 0.3):
+                if direction1_score > direction2_score:
+                    if direction1_source_alternative != original_source:
+                        logger.info(f"Recursive selection: Both good, using D1 source {original_source} -> {direction1_source_alternative}")
+                        return direction1_source_alternative, original_target
+                else:
+                    if direction2_target_alternative != original_target:
+                        logger.info(f"Recursive selection: Both good, using D2 target {original_target} -> {direction2_target_alternative}")
+                        return original_source, direction2_target_alternative
+            
+            # Check if we can use both improvements (only if they don't conflict)
+            elif (direction1_score > 0.25 and direction2_score > 0.25 and 
+                  direction1_source_alternative != original_source and 
+                  direction2_target_alternative != original_target and
+                  direction1_source_alternative != direction2_target_alternative):  # Avoid self-loops
+                logger.info(f"Recursive selection: Using both improvements {direction1_source_alternative} -> {direction2_target_alternative}")
+                return direction1_source_alternative, direction2_target_alternative
+            
+            # No significant improvement found, use original routing
+            logger.debug("Recursive selection: No significant improvement, using original routing")
+            return original_source, original_target
+            
+        except Exception as e:
+            logger.error(f"Error in recursive entity selection: {e}")
+            return original_source, original_target
+
     async def smart_edge_routing(
         self,
         source_node_id: str,
@@ -856,17 +1713,31 @@ Subcategories:
         edge_data: Dict[str, Any]
     ) -> bool:
         """
-        Main entry point for smart edge routing with hierarchical management.
+        Main entry point for bidirectional smart edge routing with hierarchical management.
+        
+        This method analyzes both source and target entities to find the best routing
+        for the edge, considering similarity and hierarchical constraints.
         
         Returns:
             bool: True if edge was successfully routed
         """
         try:
-            # Check if source node exists and exceeds edge limit
+            # Get node existence status
             source_node_exists = await self.knowledge_graph_inst.has_node(source_node_id)
-            if source_node_exists and await self.check_edge_limit(source_node_id):
+            target_node_exists = await self.knowledge_graph_inst.has_node(target_node_id)
+            
+            # Get node data for both entities if they exist
+            source_node_data = await self.knowledge_graph_inst.get_node(source_node_id) if source_node_exists else None
+            target_node_data = await self.knowledge_graph_inst.get_node(target_node_id) if target_node_exists else None
+            
+            # Check for hierarchical splitting needs on both ends
+            source_needs_splitting = source_node_exists and await self.check_edge_limit(source_node_id)
+            target_needs_splitting = target_node_exists and await self.check_edge_limit(target_node_id)
+            
+            # Handle hierarchical splitting if needed
+            if source_needs_splitting:
                 out_degree_edges = await self.knowledge_graph_inst.node_out_edges(source_node_id)
-                logger.info(f"Node {source_node_id} exceeds outbound edge limit ({len(out_degree_edges)} >= {self.edge_limit}), triggering hierarchical splitting")
+                logger.info(f"Source node {source_node_id} exceeds outbound edge limit ({len(out_degree_edges)} >= {self.edge_limit}), triggering hierarchical splitting")
                 
                 return await self.trigger_hierarchical_splitting(
                     source_node_id, 
@@ -875,35 +1746,51 @@ Subcategories:
                     out_degree_edges
                 )
             
-            # For new nodes or nodes that don't exceed limit, just create the edge normally
-            # Skip smart routing if target node doesn't exist yet
-            target_node_data = await self.knowledge_graph_inst.get_node(target_node_id)
-            if not target_node_data:
-                # Target node doesn't exist yet, just create edge normally
-                await self.knowledge_graph_inst.upsert_edge(source_node_id, target_node_id, edge_data)
+            if target_needs_splitting:
+                out_degree_edges = await self.knowledge_graph_inst.node_out_edges(target_node_id)
+                logger.info(f"Target node {target_node_id} exceeds outbound edge limit ({len(out_degree_edges)} >= {self.edge_limit}), triggering hierarchical splitting")
+                
+                # For target splitting, we need to reverse the edge direction logic
+                return await self.trigger_hierarchical_splitting(
+                    target_node_id, 
+                    source_node_id, 
+                    edge_data,
+                    out_degree_edges
+                )
+            
+            # Perform bidirectional smart routing if both nodes exist
+            if source_node_exists and target_node_exists:
+                return await self._bidirectional_smart_routing(
+                    source_node_id, target_node_id, 
+                    source_node_data, target_node_data, 
+                    edge_data
+                )
+            
+            # If only one node exists, try to find best parent for the new node
+            elif source_node_exists and not target_node_exists:
+                # Source exists, target is new - find best parent for target
+                best_source = await self._find_best_entity_match(
+                    target_node_id, edge_data, "target", source_node_id
+                )
+                await self.knowledge_graph_inst.upsert_edge(best_source, target_node_id, edge_data)
+                logger.info(f"Routed new target {target_node_id} to best source: {best_source}")
+                return True
+                
+            elif target_node_exists and not source_node_exists:
+                # Target exists, source is new - find best parent for source
+                best_target = await self._find_best_entity_match(
+                    source_node_id, edge_data, "source", target_node_id
+                )
+                await self.knowledge_graph_inst.upsert_edge(source_node_id, best_target, edge_data)
+                logger.info(f"Routed new source {source_node_id} to best target: {best_target}")
                 return True
             
-            # Find best parent node using smart routing only if both nodes exist
-            if source_node_exists:
-                best_parent, max_score = await self.find_best_parent_node(
-                    target_node_id,
-                    target_node_data,
-                    source_node_id
-                )
-                
-                # Only route to different parent if it has a meaningfully better score
-                if best_parent != source_node_id and max_score > 0.1:  # Minimum meaningful score
-                    logger.info(f"Routing edge to best parent: {best_parent} (max score: {max_score:.3f})")
-                    await self.knowledge_graph_inst.upsert_edge(best_parent, target_node_id, edge_data)
-                else:
-                    # Create edge normally with original source
-                    await self.knowledge_graph_inst.upsert_edge(source_node_id, target_node_id, edge_data)
             else:
-                # Source node doesn't exist, create edge normally
+                # Both nodes are new, create edge normally
                 await self.knowledge_graph_inst.upsert_edge(source_node_id, target_node_id, edge_data)
-            
-            return True
+                logger.info(f"Created edge between new entities: {source_node_id} -> {target_node_id}")
+                return True
             
         except Exception as e:
-            logger.error(f"Error in smart edge routing: {e}")
+            logger.error(f"Error in bidirectional smart edge routing: {e}")
             return False

@@ -1,0 +1,2305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LightRAG Query Pipeline with Visual Hopping</title>
+    <script src="https://unpkg.com/cytoscape@3.26.0/dist/cytoscape.min.js"></script>
+    <script src="https://unpkg.com/cytoscape-cose-bilkent@4.1.0/cytoscape-cose-bilkent.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f5f5;
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .container {
+            width: 100vw;
+            height: 100vh;
+            background: white;
+            display: grid;
+            grid-template-columns: 280px 1fr 400px;
+            grid-template-rows: 60px 1fr;
+            grid-template-areas: 
+                "header header header"
+                "left-panel graph right-panel";
+            gap: 1px;
+            overflow: hidden;
+        }
+
+        .header {
+            grid-area: header;
+            background: linear-gradient(45deg, #2c3e50, #3498db);
+            color: white;
+            padding: 10px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 1.5em;
+            margin: 0;
+            font-weight: 400;
+        }
+
+        .header p {
+            display: none; /* Hide subtitle to save space */
+        }
+
+        .left-panel {
+            grid-area: left-panel;
+            background: #f8f9fa;
+            padding: 10px;
+            overflow-y: auto;
+            border-right: 1px solid #e9ecef;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .right-panel {
+            grid-area: right-panel;
+            background: #f8f9fa;
+            padding: 15px;
+            overflow-y: auto;
+            border-left: 1px solid #e9ecef;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .chatbot-section {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+        
+        .chat-messages {
+            flex: 1;
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+            overflow-y: auto;
+            border: 1px solid #e9ecef;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            max-height: calc(100vh - 300px);
+        }
+        
+        .message {
+            padding: 12px 16px;
+            border-radius: 12px;
+            max-width: 85%;
+            word-wrap: break-word;
+            line-height: 1.5;
+        }
+        
+        .user-message {
+            background: #3498db;
+            color: white;
+            align-self: flex-end;
+            margin-left: auto;
+        }
+        
+        .assistant-message {
+            background: #f8f9fa;
+            color: #2c3e50;
+            border: 1px solid #e9ecef;
+            align-self: flex-start;
+        }
+        
+        .query-analysis {
+            background: #e8f4f8;
+            border-left: 4px solid #3498db;
+            font-size: 12px;
+            padding: 10px;
+            margin: 5px 0;
+        }
+        
+        .exploration-status {
+            background: #f0f8e8;
+            border-left: 4px solid #27ae60;
+            font-size: 12px;
+            padding: 10px;
+            margin: 5px 0;
+        }
+
+        .graph-container {
+            grid-area: graph;
+            position: relative;
+            background: white;
+            overflow: hidden;
+        }
+
+        #cy {
+            width: 100%;
+            height: 100%;
+            border-left: 1px solid #e9ecef;
+        }
+
+        .control-group {
+            margin-bottom: 10px;
+            padding: 8px;
+            background: white;
+            border-radius: 6px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .control-group h3 {
+            color: #2c3e50;
+            margin-bottom: 8px;
+            font-size: 0.9em;
+            border-bottom: 1px solid #3498db;
+            padding-bottom: 3px;
+        }
+
+        .form-group {
+            margin-bottom: 8px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 2px;
+            font-weight: 600;
+            color: #555;
+            font-size: 0.8em;
+        }
+
+        input[type="text"], input[type="range"], input[type="number"], select, textarea {
+            width: 100%;
+            padding: 6px;
+            border: 1px solid #e1e5e9;
+            border-radius: 4px;
+            font-size: 12px;
+            transition: border-color 0.3s ease;
+        }
+
+        .right-panel input[type="text"], .right-panel input[type="number"], .right-panel textarea {
+            padding: 12px;
+            font-size: 14px;
+            border: 2px solid #e1e5e9;
+            border-radius: 8px;
+            transition: border-color 0.3s ease;
+        }
+
+        .right-panel textarea {
+            min-height: 80px;
+            resize: vertical;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        }
+
+        .right-panel button {
+            padding: 12px 16px;
+            font-size: 14px;
+            font-weight: 600;
+            margin: 8px 0;
+            border-radius: 6px;
+        }
+
+        .right-panel label {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #2c3e50;
+        }
+
+        .right-panel .control-group {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #e9ecef;
+        }
+
+        .right-panel .form-group {
+            margin-bottom: 15px;
+        }
+        
+        .chat-input-section {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #e9ecef;
+            border-top: 2px solid #3498db;
+        }
+
+        input[type="text"]:focus, textarea:focus {
+            outline: none;
+            border-color: #3498db;
+            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+        }
+
+        button {
+            background: linear-gradient(45deg, #3498db, #2980b9);
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            width: 100%;
+            margin: 2px 0;
+        }
+
+        button:hover {
+            background: linear-gradient(45deg, #2980b9, #1f618d);
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(52, 152, 219, 0.3);
+        }
+
+        button:disabled {
+            background: #bdc3c7;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .btn-success {
+            background: linear-gradient(45deg, #27ae60, #229954);
+        }
+
+        .btn-success:hover {
+            background: linear-gradient(45deg, #229954, #1e8449);
+        }
+
+        .btn-warning {
+            background: linear-gradient(45deg, #f39c12, #e67e22);
+        }
+
+        .btn-warning:hover {
+            background: linear-gradient(45deg, #e67e22, #d35400);
+        }
+
+        .threshold-display {
+            text-align: center;
+            font-weight: bold;
+            color: #3498db;
+            font-size: 1.1em;
+            margin-top: 5px;
+        }
+
+        .hop-info {
+            background: #ecf0f1;
+            padding: 8px;
+            border-radius: 4px;
+            margin: 5px 0;
+            font-size: 11px;
+        }
+
+        .hop-info h4 {
+            color: #2c3e50;
+            margin-bottom: 5px;
+            font-size: 0.9em;
+        }
+
+        .hop-info div {
+            margin-bottom: 2px;
+        }
+
+        .context-window {
+            max-height: 120px;
+            overflow-y: auto;
+            background: #f8f9fa;
+            padding: 8px;
+            border-radius: 6px;
+            border: 1px solid #e9ecef;
+        }
+
+        .context-item {
+            background: white;
+            padding: 6px;
+            margin: 3px 0;
+            border-radius: 4px;
+            border-left: 3px solid #3498db;
+            font-size: 11px;
+            line-height: 1.3;
+        }
+
+        .status-indicator {
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            text-align: center;
+            margin: 10px 0;
+        }
+
+        .status-ready {
+            background: #d5f4e6;
+            color: #27ae60;
+        }
+
+        .status-processing {
+            background: #fef5e7;
+            color: #f39c12;
+        }
+
+        .status-error {
+            background: #fadbd8;
+            color: #e74c3c;
+        }
+
+        .legend {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            font-size: 12px;
+            min-width: 200px;
+        }
+
+        .legend h4 {
+            margin-bottom: 10px;
+            color: #2c3e50;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin: 5px 0;
+        }
+
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 3px;
+            margin-right: 10px;
+        }
+
+        .answer-section {
+            background: white;
+            padding: 0;
+            border-radius: 8px;
+            margin: 0;
+        }
+
+        .answer-text {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 12px;
+            border: 1px solid #e9ecef;
+            font-size: 14px;
+            line-height: 1.6;
+            margin: 0;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .context-query-section {
+            margin-top: 15px;
+            padding: 0;
+            background: transparent;
+            border-radius: 0;
+            border: none;
+        }
+
+        .context-query-input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e1e5e9;
+            border-radius: 8px;
+            font-size: 14px;
+            margin-bottom: 10px;
+            resize: vertical;
+            min-height: 60px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        }
+
+        .context-query-input:focus {
+            outline: none;
+            border-color: #3498db;
+            box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+        }
+
+        .btn-context {
+            background: linear-gradient(45deg, #3498db, #2980b9) !important;
+            width: 100%;
+            padding: 12px 16px;
+            font-size: 14px;
+            border-radius: 6px;
+        }
+
+        .btn-context:hover {
+            background: linear-gradient(45deg, #2980b9, #1f618d) !important;
+            transform: translateY(-1px);
+            box-shadow: 0 3px 10px rgba(52, 152, 219, 0.3);
+        }
+
+        .btn-context:disabled {
+            background: #bdc3c7 !important;
+            transform: none !important;
+            box-shadow: none !important;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3498db;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        .loading-large {
+            display: inline-block;
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.9);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            backdrop-filter: blur(2px);
+        }
+
+        .loading-text {
+            margin-top: 15px;
+            font-size: 16px;
+            color: #2c3e50;
+            font-weight: 600;
+        }
+
+        .pulse-animation {
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .graph-loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            z-index: 100;
+        }
+
+        .similarity-score {
+            background: #3498db;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔍 LightRAG Query Pipeline - Interactive Knowledge Graph Exploration</h1>
+        </div>
+
+        <div class="left-panel">
+            <!-- Initialization -->
+            <div class="control-group">
+                <h3>🚀 Initialize System</h3>
+                <div class="form-group">
+                    <label for="folderPath">Data Folder Path:</label>
+                    <input type="text" id="folderPath" value="/Users/shaik.s/Desktop/LightRAG/" placeholder="Enter folder path">
+                </div>
+                <button onclick="initializeSystem()">Initialize Graph Data</button>
+                <div id="initStatus" class="status-indicator status-ready">Ready to Initialize</div>
+            </div>
+
+            <!-- Query Processing -->
+            <div class="control-group">
+                <h3>🔍 Query Processing</h3>
+                <div class="form-group">
+                    <label for="queryInput">Enter your query:</label>
+                    <textarea id="queryInput" rows="3" placeholder="What would you like to know about the data?" style="width: 100%; padding: 6px; border: 1px solid #e1e5e9; border-radius: 4px; resize: vertical; font-size: 12px;"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="topK">Top K Nodes:</label>
+                    <input type="number" id="topK" value="5" min="1" max="20" style="width: 100%;">
+                </div>
+                <div style="display: flex; gap: 5px; margin-bottom: 8px;">
+                    <label style="display: flex; align-items: center; font-size: 11px;">
+                        <input type="checkbox" id="enableRewriter" onchange="checkRewriterAvailability()" style="margin-right: 5px;">
+                        Smart Enhancement
+                    </label>
+                </div>
+                <div style="display: flex; gap: 5px;">
+                    <button onclick="processQuery()" id="queryBtn" disabled style="flex: 2;">🔍 Process Query</button>
+                    <button onclick="rewriteQuery()" id="rewriteBtn" disabled style="display: none; flex: 1;" class="btn-warning">✨ Enhance</button>
+                </div>
+            </div>
+
+            <!-- Exploration Settings -->
+            <div class="control-group">
+                <h3>⚙️ Exploration Settings</h3>
+                <div class="form-group">
+                    <label for="threshold">Similarity Threshold:</label>
+                    <input type="range" id="threshold" min="0" max="1" step="0.05" value="0.7" oninput="updateThresholdDisplay()">
+                    <div class="threshold-display" id="thresholdDisplay">0.70</div>
+                    <small style="color: #7f8c8d; font-size: 10px;">Higher values = more selective exploration</small>
+                </div>
+                <div class="form-group">
+                    <label for="maxNodes">Max Nodes:</label>
+                    <input type="number" id="maxNodes" value="100" min="10" max="500" step="10">
+                </div>
+                <div class="form-group">
+                    <label for="hopWeightReduction">Hop Threshold Increase:</label>
+                    <input type="range" id="hopWeightReduction" min="0.05" max="0.3" step="0.05" value="0.15" oninput="updateWeightReductionDisplay()">
+                    <div class="threshold-display" id="weightReductionDisplay">0.15</div>
+                </div>
+                <div class="form-group">
+                    <label for="traversalDirection">Edge Traversal Direction:</label>
+                    <select id="traversalDirection" style="width: 100%; padding: 6px; border: 1px solid #e1e5e9; border-radius: 4px; font-size: 12px;">
+                        <option value="bidirectional">Bidirectional (Both Directions)</option>
+                        <option value="unidirectional">Unidirectional (Forward Only)</option>
+                    </select>
+                    <small style="color: #7f8c8d; font-size: 10px;">Bidirectional: A→B and B→A | Unidirectional: A→B only</small>
+                </div>
+            </div>
+
+            <!-- Hopping Control Mode -->
+            <div class="control-group">
+                <h3>🔄 Hopping Mode</h3>
+                <div class="form-group">
+                    <label for="hoppingMode">Select Mode:</label>
+                    <select id="hoppingMode" onchange="toggleHoppingMode()" style="width: 100%; padding: 6px; border: 1px solid #e1e5e9; border-radius: 4px;">
+                        <option value="auto">Auto-Expansion</option>
+                        <option value="manual">Manual Hopping</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Auto-Expansion Settings -->
+            <div class="control-group" id="autoExpansionSettings">
+                <h3>🔄 Auto-Expansion Settings</h3>
+                <div class="form-group">
+                    <label for="expansionDelay">Expansion Delay (ms):</label>
+                    <input type="range" id="expansionDelay" min="500" max="3000" step="250" value="1500" oninput="updateExpansionDelay()">
+                    <div class="threshold-display" id="expansionDelayDisplay">1500ms</div>
+                </div>
+                <div class="hop-info" style="margin-top: 10px;">
+                    <div style="font-size: 11px;">
+                        Status: <span id="expansionStatus" style="color: #7f8c8d;">Ready</span>
+                    </div>
+                    <div style="font-size: 11px;">
+                        Progress: <span id="expansionProgress">0</span> / <span id="expansionTarget">0</span> nodes
+                    </div>
+                </div>
+                <button onclick="stopExpansion()" id="stopExpansionBtn" disabled style="background: linear-gradient(45deg, #e74c3c, #c0392b);">
+                    ⏹️ Stop Expansion
+                </button>
+            </div>
+
+            <!-- Manual Hopping Controls -->
+            <div class="control-group" id="manualHoppingSettings" style="display: none;">
+                <h3>👆 Manual Hopping</h3>
+                <div class="form-group">
+                    <button onclick="performHop()" id="hopBtn" disabled style="background: linear-gradient(45deg, #27ae60, #229954);">
+                        🚀 Next Hop
+                    </button>
+                    <button onclick="generateAnswer()" id="answerBtn" disabled class="btn-success">
+                        🤖 Generate Answer
+                    </button>
+                </div>
+                <div class="hop-info" style="margin-top: 10px;">
+                    <div style="font-size: 11px; text-align: center; color: #7f8c8d;">
+                        Click "Next Hop" to explore adjacent nodes manually
+                    </div>
+                </div>
+            </div>
+
+            <!-- Physics Controls -->
+            <div class="control-group">
+                <h3>⚡ Physics Settings</h3>
+                <div class="form-group">
+                    <label for="enablePhysics">
+                        <input type="checkbox" id="enablePhysics" style="margin-right: 8px;">
+                        Enable Physics Layout
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label for="nodeRepulsion">Node Repulsion:</label>
+                    <input type="range" id="nodeRepulsion" min="1000" max="8000" step="500" value="4500" oninput="updatePhysicsDisplay()">
+                    <div class="threshold-display" id="nodeRepulsionDisplay">4500</div>
+                </div>
+                <div class="form-group">
+                    <label for="edgeLength">Edge Length:</label>
+                    <input type="range" id="edgeLength" min="50" max="300" step="25" value="150" oninput="updatePhysicsDisplay()">
+                    <div class="threshold-display" id="edgeLengthDisplay">150</div>
+                </div>
+                <div class="form-group">
+                    <button onclick="applyPhysics()" id="applyPhysicsBtn" style="background: linear-gradient(45deg, #9b59b6, #8e44ad);">
+                        🎯 Apply Physics
+                    </button>
+                </div>
+                <div class="hop-info" style="margin-top: 5px;">
+                    <div style="font-size: 10px;">
+                        Layout: <span id="currentLayoutDisplay" style="color: #3498db;">COSE</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Query Analysis & Status -->
+            <div class="control-group">
+                <h3>📊 Query Analysis</h3>
+                <div class="query-analysis" id="queryAnalysis">
+                    <div>Keywords: <span id="extractedKeywords">None</span></div>
+                    <div>Keyword Matches: <span id="keywordMatches">0</span></div>
+                    <div>Embedding Matches: <span id="embeddingMatches">0</span></div>
+                    <div>Combined Results: <span id="combinedResults">0</span></div>
+                </div>
+                
+                <div class="exploration-status" id="hopInfo" style="margin-top: 10px;">
+                    <div>Current Hop: <span id="currentHop">0</span></div>
+                    <div>Total Nodes: <span id="visitedCount">0</span> / <span id="maxNodesDisplay">100</span></div>
+                    <div>Context Items: <span id="contextCount">0</span></div>
+                    <div>Dynamic Threshold: <span id="dynamicThreshold">0.700</span></div>
+                </div>
+                
+                <!-- Query Rewriter Status -->
+                <div id="rewriterSection" style="display: none; margin-top: 10px; padding: 10px; background: #f0f8ff; border-radius: 6px; border-left: 4px solid #3498db;">
+                    <h4 style="margin: 0 0 8px 0; color: #2c3e50;">✨ Query Enhancement</h4>
+                    <div style="font-size: 11px;">
+                        <div>High-degree nodes: <span id="highDegreeCount">0</span></div>
+                        <div>Entities: <span id="suggestedEntities">None</span></div>
+                        <div style="margin-top: 8px;">
+                            <strong>Original:</strong><br>
+                            <span id="originalQuery" style="font-style: italic; color: #7f8c8d; line-height: 1.4;">None</span>
+                        </div>
+                        <div style="margin-top: 8px;">
+                            <strong>Enhanced:</strong><br>
+                            <span id="enhancedQuery" style="color: #27ae60; line-height: 1.4;">None</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="right-panel">
+            <!-- Answer Section -->
+            <div class="control-group">
+                <h3>🤖 Query Results</h3>
+                <div id="answerPlaceholder" class="answer-section" style="padding: 20px; text-align: center; color: #7f8c8d; font-style: italic;">
+                    Process a query to see results here...
+                </div>
+                <div id="answerSection" class="answer-section" style="display: none;">
+                    <div id="answerText" class="answer-text"></div>
+                    
+                    <!-- Context Query Section -->
+                    <div class="context-query-section" id="contextQuerySection" style="display: none;">
+                        <label for="contextQuery" style="font-weight: bold; color: #2c3e50; margin-bottom: 8px;">Ask follow-up question on this context:</label>
+                        <textarea id="contextQuery" class="context-query-input" placeholder="Ask a follow-up question based on the current context..." rows="2"></textarea>
+                        <button onclick="queryOnContext()" id="contextQueryBtn" class="btn-context">
+                            💭 Query on Context
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Context Window Display -->
+            <div class="control-group">
+                <h3>📄 Context Window</h3>
+                <div id="contextWindow" class="context-window">
+                    <div style="text-align: center; color: #7f8c8d; padding: 20px; font-style: italic;">
+                        Context will appear here as you explore the graph...
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Exploration Path -->
+            <div class="control-group">
+                <h3>🗺️ Exploration Path</h3>
+                <div id="explorationPath" class="context-window">
+                    <div style="text-align: center; color: #7f8c8d; padding: 20px; font-style: italic;">
+                        Path will appear here as you hop through the graph...
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="graph-container">
+            <div id="cy"></div>
+            
+            <!-- Loading overlay for graph -->
+            <div id="graphLoading" class="loading-overlay" style="display: none;">
+                <div class="loading-large"></div>
+                <div class="loading-text">Processing graph visualization...</div>
+            </div>
+            
+            <!-- Initial graph message -->
+            <div id="graphMessage" class="graph-loading">
+                <h3 style="color: #7f8c8d;">🔍 Graph Visualization</h3>
+                <p style="color: #95a5a6; margin-top: 10px;">Initialize system and process query to see the knowledge graph</p>
+            </div>
+            
+            <div class="legend">
+                <h4>Graph Legend</h4>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #3498db;"></div>
+                    <span>Query Nodes</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #27ae60;"></div>
+                    <span>Current Hop</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #f39c12;"></div>
+                    <span>Visited</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #e67e22;"></div>
+                    <span>Path Edges</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #e74c3c;"></div>
+                    <span>Cycle Detected</span>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // Global variables
+        let cy;
+        let currentLayout;
+        let coseBilkentAvailable = false;
+        let autoExpansionRunning = false;
+        let autoExpansionTimeout = null;
+        let currentState = {
+            query: '',
+            currentNodes: [],
+            visitedNodes: [],
+            contextWindow: [],
+            queryEmbedding: [],
+            hopNumber: 0,
+            graphData: { nodes: [], edges: [] },
+            allNodes: new Map(), // Track all nodes to prevent duplicates
+            currentPath: [], // Track the exploration path
+            pathEdges: [] // Track edges in the current path
+        };
+
+        // Get default layout with good balanced settings
+        function getDefaultLayout() {
+            return {
+                name: 'cose',
+                randomize: false,
+                idealEdgeLength: 120,
+                refresh: 20,
+                fit: true,
+                padding: 40,
+                nodeRepulsion: 3000,
+                animate: true,
+                animationDuration: 800,
+                animationEasing: 'ease-out'
+            };
+        }
+
+        // Initialize Cytoscape
+        function initializeCytoscape() {
+            const container = document.getElementById('cy');
+            if (!container) {
+                throw new Error('Cytoscape container not found');
+            }
+            
+            cy = cytoscape({
+                container: container,
+                style: [
+                    {
+                        selector: 'node',
+                        style: {
+                            'background-color': '#3498db',
+                            'label': 'data(label)',
+                            'width': 'mapData(degree, 1, 10, 40, 80)',
+                            'height': 'mapData(degree, 1, 10, 40, 80)',
+                            'font-size': 'mapData(degree, 1, 10, 8, 14)',
+                            'text-wrap': 'wrap',
+                            'text-max-width': '80px',
+                            'text-valign': 'center',
+                            'text-halign': 'center',
+                            'color': '#2c3e50',
+                            'text-outline-width': 2,
+                            'text-outline-color': '#ffffff',
+                            'border-width': 3,
+                            'border-color': '#2980b9',
+                            'text-margin-y': 5,
+                            'transition-property': 'background-color, border-color, width, height',
+                            'transition-duration': '0.3s'
+                        }
+                    },
+                    {
+                        selector: 'edge',
+                        style: {
+                            'width': 'mapData(weight, 0, 1, 2, 8)',
+                            'line-color': '#bdc3c7',
+                            'target-arrow-color': '#bdc3c7',
+                            'target-arrow-shape': 'triangle',
+                            'curve-style': 'bezier',
+                            'label': 'data(similarity)',
+                            'font-size': '10px',
+                            'color': '#7f8c8d',
+                            'text-outline-width': 1,
+                            'text-outline-color': '#ffffff'
+                        }
+                    },
+                    {
+                        selector: '.query-node',
+                        style: {
+                            'background-color': '#3498db',
+                            'border-color': '#2980b9',
+                            'border-width': 3
+                        }
+                    },
+                    {
+                        selector: '.current-hop',
+                        style: {
+                            'background-color': '#27ae60',
+                            'border-color': '#229954',
+                            'border-width': 3
+                        }
+                    },
+                    {
+                        selector: '.visited',
+                        style: {
+                            'background-color': '#f39c12',
+                            'border-color': '#e67e22',
+                            'border-width': 3
+                        }
+                    },
+                    {
+                        selector: '.cycle',
+                        style: {
+                            'background-color': '#e74c3c',
+                            'border-color': '#c0392b',
+                            'border-width': 3
+                        }
+                    },
+                    {
+                        selector: '.path-edge',
+                        style: {
+                            'line-color': '#e67e22',
+                            'target-arrow-color': '#e67e22',
+                            'width': 4,
+                            'opacity': 0.8
+                        }
+                    },
+                    {
+                        selector: '.path-node',
+                        style: {
+                            'border-width': 4,
+                            'border-color': '#e67e22',
+                            'opacity': 0.9
+                        }
+                    }
+                ],
+                layout: getDefaultLayout()
+            });
+
+            // Add node click handlers
+            cy.on('tap', 'node', function(evt) {
+                const node = evt.target;
+                const data = node.data();
+                const matchInfo = data.match_details ? `\nMatch Details: ${data.match_details}` : '';
+                const matchType = data.match_type ? `\nMatch Type: ${data.match_type}` : '';
+                alert(`Node: ${data.id}\nType: ${data.type}\nSimilarity: ${data.similarity?.toFixed(3) || 'N/A'}${matchInfo}${matchType}\nDescription: ${data.description.substring(0, 200)}${data.description.length > 200 ? '...' : ''}`);
+            });
+        }
+
+        // API calls
+        async function apiCall(endpoint, data = null) {
+            const url = `http://localhost:8000${endpoint}`;
+            const options = {
+                method: data ? 'POST' : 'GET',
+                headers: { 'Content-Type': 'application/json' }
+            };
+            if (data) options.body = JSON.stringify(data);
+
+            console.log(`API Call: ${endpoint}`, data);
+
+            try {
+                const response = await fetch(url, options);
+                console.log(`Response status: ${response.status}`);
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error(`API Error: ${response.status} - ${errorText}`);
+                    throw new Error(`HTTP ${response.status}: ${errorText}`);
+                }
+                
+                const result = await response.json();
+                console.log(`API Response:`, result);
+                return result;
+            } catch (error) {
+                console.error(`API call failed: ${error.message}`);
+                throw error;
+            }
+        }
+
+        // Show/hide loading overlay
+        function showLoading(elementId, message = 'Loading...') {
+            const element = document.getElementById(elementId);
+            if (element) {
+                element.style.display = 'flex';
+                const textElement = element.querySelector('.loading-text');
+                if (textElement) textElement.textContent = message;
+            }
+        }
+
+        function hideLoading(elementId) {
+            const element = document.getElementById(elementId);
+            if (element) {
+                element.style.display = 'none';
+            }
+        }
+
+        // Initialize system
+        async function initializeSystem() {
+            const folderPath = document.getElementById('folderPath')?.value || '';
+            const statusDiv = document.getElementById('initStatus');
+            
+            if (!folderPath) {
+                alert('Please enter a folder path');
+                return;
+            }
+
+            statusDiv.className = 'status-indicator status-processing';
+            statusDiv.innerHTML = '<span class="loading"></span> Initializing graph data...';
+
+            try {
+                const result = await apiCall('/initialize', { folder_path: folderPath });
+                statusDiv.className = 'status-indicator status-ready';
+                statusDiv.textContent = `✅ Loaded: ${result.nodes_count} nodes, ${result.edges_count} edges`;
+                // Enable query button after initialization
+                const queryBtn = document.getElementById('queryBtn');
+                if (queryBtn) queryBtn.disabled = false;
+                
+                // Hide initial graph message
+                document.getElementById('graphMessage').style.display = 'none';
+            } catch (error) {
+                statusDiv.className = 'status-indicator status-error';
+                statusDiv.textContent = `❌ Error: ${error.message}`;
+            }
+        }
+
+        // Process initial query (original functionality)
+        async function processQuery() {
+            const query = document.getElementById('queryInput')?.value || '';
+            const folderPath = document.getElementById('folderPath')?.value || '';
+            const topK = parseInt(document.getElementById('topK')?.value || '5');
+            const threshold = parseFloat(document.getElementById('threshold')?.value || '0.7');
+            const maxNodes = parseInt(document.getElementById('maxNodes')?.value || '100');
+
+            if (!query.trim()) {
+                alert('Please enter a query');
+                return;
+            }
+
+            if (!folderPath.trim()) {
+                alert('Please initialize the system first');
+                return;
+            }
+
+            // Show loading states
+            const queryBtn = document.getElementById('queryBtn');
+            const originalText = queryBtn.innerHTML;
+            queryBtn.innerHTML = '<span class="loading"></span> Processing Query...';
+            queryBtn.disabled = true;
+
+            // Show loading for graph
+            showLoading('graphLoading', 'Extracting keywords and computing embeddings...');
+
+            try {
+                // Call the API directly
+                const response = await apiCall('/query', {
+                    query: query,
+                    folder_path: folderPath,
+                    threshold: threshold,
+                    top_k: topK,
+                    max_nodes: maxNodes
+                });
+
+                // Update current state
+                currentState.query = query;
+                currentState.currentNodes = response.top_nodes.map(n => n.id);
+                currentState.visitedNodes = response.hop_data.visited_nodes;
+                currentState.contextWindow = response.context_window;
+                currentState.queryEmbedding = response.hop_data.query_embedding;
+                currentState.hopNumber = 0;
+
+                // Update query analysis UI
+                updateQueryAnalysis(response);
+                
+                // Update UI
+                updateHopInfo();
+                updateContextWindow();
+                
+                // Update loading message and visualize
+                showLoading('graphLoading', 'Rendering graph visualization...');
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                visualizeGraph(response.top_nodes, [], false, false);
+                
+                // Enable hopping controls
+                const hopBtn = document.getElementById('hopBtn');
+                const answerBtn = document.getElementById('answerBtn');
+                if (hopBtn) hopBtn.disabled = false;
+                if (answerBtn) answerBtn.disabled = false;
+
+                // Check if auto-expansion mode is enabled and start it
+                const hoppingMode = document.getElementById('hoppingMode');
+                if (hoppingMode && hoppingMode.value === 'auto') {
+                    console.log('Auto mode detected, starting auto expansion...');
+                    setTimeout(async () => {
+                        await startAutoExpansion();
+                    }, 1000); // Small delay to let the graph render first
+                }
+
+            } catch (error) {
+                console.error('Query processing error:', error);
+                alert(`Error processing query: ${error.message}`);
+            } finally {
+                // Reset button
+                queryBtn.innerHTML = originalText;
+                queryBtn.disabled = false;
+                hideLoading('graphLoading');
+            }
+        }
+
+        // Update query analysis display
+        function updateQueryAnalysis(response) {
+            const keywords = response.hop_data.extracted_keywords || [];
+            const nodes = response.top_nodes || [];
+            
+            // Count different match types
+            let keywordMatches = 0;
+            let embeddingMatches = 0;
+            
+            nodes.forEach(node => {
+                const matchDetails = node.match_details || '';
+                if (matchDetails.includes('Keyword:') && parseFloat(matchDetails.split('Keyword: ')[1]) > 0) {
+                    keywordMatches++;
+                }
+                if (matchDetails.includes('Embedding:') && parseFloat(matchDetails.split('Embedding: ')[1].split(',')[0]) > 0) {
+                    embeddingMatches++;
+                }
+            });
+            
+            // Update left panel display with null checks
+            const keywordsEl = document.getElementById('extractedKeywords');
+            if (keywordsEl) keywordsEl.textContent = keywords.length > 0 ? keywords.join(', ') : 'None';
+            
+            const keywordMatchesEl = document.getElementById('keywordMatches');
+            if (keywordMatchesEl) keywordMatchesEl.textContent = keywordMatches;
+            
+            const embeddingMatchesEl = document.getElementById('embeddingMatches');
+            if (embeddingMatchesEl) embeddingMatchesEl.textContent = embeddingMatches;
+            
+            const combinedResultsEl = document.getElementById('combinedResults');
+            if (combinedResultsEl) combinedResultsEl.textContent = nodes.length;
+        }
+
+        // Perform hop
+        async function performHop() {
+            const baseThreshold = parseFloat(document.getElementById('threshold')?.value || '0.7');
+            const weightReduction = parseFloat(document.getElementById('hopWeightReduction')?.value || '0.15');
+            const hopBtn = document.getElementById('hopBtn');
+            const originalText = hopBtn.innerHTML;
+
+            // Calculate dynamic threshold with weight increase (making it more restrictive)
+            const dynamicThreshold = Math.min(1.0, baseThreshold + (currentState.hopNumber * weightReduction));
+            const traversalDirection = document.getElementById('traversalDirection')?.value || 'bidirectional';
+            
+            console.log(`Hop ${currentState.hopNumber + 1}: Base threshold: ${baseThreshold}, Weight increase: ${weightReduction}, Dynamic threshold: ${dynamicThreshold}`);
+
+            // Show loading state with dynamic threshold info
+            hopBtn.innerHTML = '<span class="loading"></span> Exploring Next Hop...';
+            hopBtn.disabled = true;
+            showLoading('graphLoading', `Computing similarities (threshold: ${dynamicThreshold.toFixed(3)})...`);
+
+            try {
+                const maxNodes = parseInt(document.getElementById('maxNodes')?.value || '100');
+                const response = await apiCall('/hop', {
+                    current_nodes: currentState.currentNodes,
+                    visited_nodes: currentState.visitedNodes,
+                    context_window: currentState.contextWindow,
+                    query_embedding: currentState.queryEmbedding,
+                    threshold: dynamicThreshold,
+                    hop_number: currentState.hopNumber + 1,
+                    max_nodes: maxNodes,
+                    direction: traversalDirection
+                });
+
+                // Update state
+                currentState.hopNumber += 1;
+                currentState.currentNodes = response.next_nodes.map(n => n.id);
+                currentState.visitedNodes = [...currentState.visitedNodes, ...currentState.currentNodes];
+                currentState.contextWindow = [...currentState.contextWindow, ...response.new_context];
+
+                // Update UI
+                updateHopInfo();
+                updateContextWindow();
+                updateDynamicThresholdDisplay();
+
+                // Small delay for smooth transition
+                showLoading('graphLoading', 'Updating graph visualization...');
+                await new Promise(resolve => setTimeout(resolve, 300));
+                
+                visualizeGraph(response.next_nodes, response.hop_edges || [], response.cycle_detected, true);
+
+                if (response.hop_complete) {
+                    hopBtn.disabled = true;
+                    const totalNodes = currentState.visitedNodes.length;
+                    const maxNodes = parseInt(document.getElementById('maxNodes')?.value || '100');
+                    if (totalNodes >= maxNodes) {
+                        alert(`Exploration complete! Reached maximum nodes limit (${totalNodes}/${maxNodes}).`);
+                    } else {
+                        alert('Exploration complete! No more similar nodes found.');
+                    }
+                } else {
+                    hopBtn.disabled = false;
+                }
+
+            } catch (error) {
+                alert(`Error performing hop: ${error.message}`);
+                hopBtn.disabled = false;
+            } finally {
+                hopBtn.innerHTML = originalText;
+                hideLoading('graphLoading');
+            }
+        }
+
+        // Generate answer
+        async function generateAnswer() {
+            const answerBtn = document.getElementById('answerBtn');
+            const originalText = answerBtn.innerHTML;
+            const answerSection = document.getElementById('answerSection');
+            const answerText = document.getElementById('answerText');
+            const answerPlaceholder = document.getElementById('answerPlaceholder');
+
+            // Show loading state
+            answerBtn.innerHTML = '<span class="loading"></span> Generating Answer...';
+            answerBtn.disabled = true;
+            
+            // Hide placeholder and show answer section with loading
+            if (answerPlaceholder) answerPlaceholder.style.display = 'none';
+            answerSection.style.display = 'block';
+            answerText.innerHTML = '<div style="text-align: center; padding: 15px;"><div class="loading"></div><div style="margin-top: 10px; color: #7f8c8d; font-size: 10px;">Gemini is analyzing the context...</div></div>';
+
+            try {
+                const response = await apiCall('/answer', {
+                    query: currentState.query,
+                    context_window: currentState.contextWindow
+                });
+
+                // Smooth transition to answer
+                await new Promise(resolve => setTimeout(resolve, 500));
+                answerText.innerHTML = `<div style="white-space: pre-wrap;">${response.answer}</div>`;
+
+            } catch (error) {
+                answerText.innerHTML = `<div style="color: #e74c3c;">❌ Error generating answer: ${error.message}</div>`;
+            } finally {
+                answerBtn.innerHTML = originalText;
+                answerBtn.disabled = false;
+            }
+        }
+
+        // Query on existing context (chat version)
+        async function queryOnContext() {
+            const contextQueryInput = document.getElementById('contextQuery');
+            const contextQueryBtn = document.getElementById('contextQueryBtn');
+            
+            if (!contextQueryInput || !contextQueryBtn) {
+                alert('Context query elements not found');
+                return;
+            }
+
+            const followUpQuery = contextQueryInput?.value?.trim() || '';
+            if (!followUpQuery) {
+                alert('Please enter a follow-up question');
+                return;
+            }
+
+            if (currentState.contextWindow.length === 0) {
+                alert('No context available. Please ask a question and explore the graph first.');
+                return;
+            }
+
+            // Add user follow-up to chat
+            addMessageToChat(followUpQuery, true);
+            
+            // Clear input
+            if (contextQueryInput) contextQueryInput.value = '';
+            
+            // Show loading message
+            const loadingMsg = addLoadingMessage();
+            
+            // Disable input while processing
+            contextQueryBtn.disabled = true;
+            contextQueryInput.disabled = true;
+
+            try {
+                const response = await apiCall('/answer', {
+                    query: followUpQuery,
+                    context_window: currentState.contextWindow
+                });
+
+                removeLoadingMessage();
+                addMessageToChat(response.answer, false);
+
+            } catch (error) {
+                removeLoadingMessage();
+                addMessageToChat(`❌ Error processing follow-up question: ${error.message}`, false);
+            } finally {
+                contextQueryBtn.disabled = false;
+                contextQueryInput.disabled = false;
+            }
+        }
+
+        // Update hop information
+        function updateHopInfo() {
+            const currentHopEl = document.getElementById('currentHop');
+            if (currentHopEl) currentHopEl.textContent = currentState.hopNumber;
+            
+            const visitedCountEl = document.getElementById('visitedCount');
+            if (visitedCountEl) visitedCountEl.textContent = currentState.visitedNodes.length;
+            
+            const contextCountEl = document.getElementById('contextCount');
+            if (contextCountEl) contextCountEl.textContent = currentState.contextWindow.length;
+            
+            // Update max nodes display
+            const maxNodesElement = document.getElementById('maxNodes');
+            const maxNodesDisplay = document.getElementById('maxNodesDisplay');
+            if (maxNodesElement && maxNodesDisplay) {
+                maxNodesDisplay.textContent = maxNodesElement?.value || '100';
+            }
+            
+            updateDynamicThresholdDisplay();
+            updateExplorationPath();
+        }
+
+        // Update exploration path display
+        function updateExplorationPath() {
+            const container = document.getElementById('explorationPath');
+            if (!container) return;
+
+            container.innerHTML = '';
+
+            if (currentState.currentPath.length === 0) {
+                const emptyDiv = document.createElement('div');
+                emptyDiv.style.cssText = 'text-align: center; color: #7f8c8d; padding: 20px;';
+                emptyDiv.textContent = 'Path will appear here as you hop through the graph...';
+                container.appendChild(emptyDiv);
+                return;
+            }
+
+            // Show the exploration path
+            currentState.currentPath.forEach((nodeId, index) => {
+                const div = document.createElement('div');
+                div.className = 'context-item';
+                
+                const stepNumber = index + 1;
+                const isCurrentHop = index === currentState.currentPath.length - 1;
+                const stepLabel = isCurrentHop ? 'Current' : `Step ${stepNumber}`;
+                
+                div.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <strong>${stepLabel}:</strong>
+                        <span class="similarity-score" style="background: ${isCurrentHop ? '#27ae60' : '#3498db'};">
+                            Hop ${Math.min(stepNumber, currentState.hopNumber)}
+                        </span>
+                    </div>
+                    <div style="margin-top: 5px; font-size: 12px;">
+                        ${nodeId.length > 50 ? nodeId.substring(0, 47) + '...' : nodeId}
+                    </div>
+                `;
+                
+                if (isCurrentHop) {
+                    div.style.borderLeftColor = '#27ae60';
+                    div.style.background = '#d5f4e6';
+                }
+
+                container.appendChild(div);
+
+                // Add arrow between steps (except for last one)
+                if (index < currentState.currentPath.length - 1) {
+                    const arrow = document.createElement('div');
+                    arrow.style.cssText = 'text-align: center; color: #3498db; font-size: 16px; margin: 5px 0;';
+                    arrow.textContent = '↓';
+                    container.appendChild(arrow);
+                }
+            });
+        }
+
+        // Update context window display
+        function updateContextWindow() {
+            const container = document.getElementById('contextWindow');
+            container.innerHTML = '';
+
+            currentState.contextWindow.forEach((item, index) => {
+                const div = document.createElement('div');
+                div.className = 'context-item';
+                div.innerHTML = `<strong>${index + 1}.</strong> ${item.substring(0, 200)}${item.length > 200 ? '...' : ''}`;
+                container.appendChild(div);
+            });
+        }
+
+        // Visualize graph with path tracking
+        function visualizeGraph(nodes, edges, cycleDetected = false, isHop = false) {
+            if (!cy || typeof cy.elements !== 'function') {
+                console.error("Cytoscape not properly initialized, attempting to reinitialize...");
+                try {
+                    initializeCytoscape();
+                    if (!cy) {
+                        console.error("Failed to reinitialize Cytoscape");
+                        return;
+                    }
+                } catch (error) {
+                    console.error("Error reinitializing Cytoscape:", error);
+                    return;
+                }
+            }
+
+            console.log("Visualizing graph with nodes:", nodes.length, "edges:", edges.length, "isHop:", isHop);
+
+            try {
+                // For hops, don't clear the graph, just add new nodes and edges
+                if (!isHop) {
+                    // Clear graph for initial query
+                    cy.elements().remove();
+                    currentState.allNodes.clear();
+                    currentState.currentPath = [];
+                    currentState.pathEdges = [];
+                }
+
+                // Validate nodes data
+                if (!nodes || nodes.length === 0) {
+                    console.warn("No nodes to visualize");
+                    return;
+                }
+
+                // Add/update nodes (prevent duplicates)
+                nodes.forEach((node, index) => {
+                    const nodeId = node.id || `node_${index}`;
+                    
+                    // Check if node already exists
+                    if (currentState.allNodes.has(nodeId)) {
+                        console.log(`Node ${nodeId} already exists, updating classes only`);
+                        const existingNode = cy.getElementById(nodeId);
+                        if (existingNode.length > 0) {
+                            // Update node class for current hop
+                            existingNode.removeClass('query-node current-hop visited cycle');
+                            existingNode.addClass(getNodeClass(nodeId, cycleDetected));
+                        }
+                        return;
+                    }
+
+                    console.log(`Adding new node ${index}:`, node);
+                    
+                    const shortLabel = nodeId.length > 25 ? nodeId.substring(0, 22) + "..." : nodeId;
+                    
+                    // Calculate node degree based on similarity score and position in results
+                    let nodeDegree = 1;
+                    if (node.similarity_score) {
+                        // Higher similarity = higher degree (more important node)
+                        nodeDegree = Math.min(Math.max(1, Math.floor(node.similarity_score * 10) + 1), 10);
+                    } else {
+                        // Use position in results (earlier = more important)
+                        nodeDegree = Math.min(Math.max(1, 8 - index), 8);
+                    }
+                    
+                    const newNode = {
+                        data: {
+                            id: nodeId,
+                            label: shortLabel,
+                            type: node.entity_type || 'unknown',
+                            description: node.description || 'No description',
+                            similarity: node.similarity_score || 0,
+                            match_details: node.match_details || 'No match details',
+                            match_type: node.match_type || 'unknown',
+                            degree: nodeDegree
+                        },
+                        classes: getNodeClass(nodeId, cycleDetected)
+                    };
+                    
+                    cy.add(newNode);
+                    currentState.allNodes.set(nodeId, node);
+                    
+                    // Add to current path
+                    if (isHop) {
+                        currentState.currentPath.push(nodeId);
+                    }
+                });
+
+                // Add edges if provided (with path tracking)
+                edges.forEach((edge, index) => {
+                    const edgeId = `${edge.source}-${edge.target}`;
+                    
+                    // Check if edge already exists
+                    if (cy.getElementById(edgeId).length > 0) {
+                        console.log(`Edge ${edgeId} already exists`);
+                        return;
+                    }
+
+                    console.log(`Adding edge ${index}:`, edge);
+                    
+                    const newEdge = {
+                        data: {
+                            id: edgeId,
+                            source: edge.source,
+                            target: edge.target,
+                            weight: edge.weight || 1,
+                            similarity: edge.similarity?.toFixed(3) || '',
+                            label: edge.description || ''
+                        },
+                        classes: isHop ? 'path-edge' : ''
+                    };
+                    
+                    cy.add(newEdge);
+                    
+                    if (isHop) {
+                        currentState.pathEdges.push(edge);
+                    }
+                });
+
+                console.log("Total elements in graph:", cy.elements().length);
+                console.log("Current path:", currentState.currentPath);
+
+                // Apply physics or default layout based on settings
+                const enablePhysics = document.getElementById('enablePhysics');
+                if (enablePhysics && enablePhysics.checked) {
+                    const nodeRepulsion = parseFloat(document.getElementById('nodeRepulsion')?.value || '4500');
+                    const edgeLength = parseFloat(document.getElementById('edgeLength')?.value || '150');
+                    if (isHop) {
+                        // For hops, apply reduced physics for stability
+                        applyPhysicsLayout(nodeRepulsion * 0.7, edgeLength * 0.8);
+                    } else {
+                        // For initial query, use full physics
+                        applyPhysicsLayout(nodeRepulsion, edgeLength);
+                    }
+                } else {
+                    cy.layout(getDefaultLayout()).run();
+                }
+
+                // Force redraw
+                cy.forceRender();
+
+            } catch (error) {
+                console.error("Error in visualizeGraph:", error);
+            }
+        }
+
+        // Get node class based on state
+        function getNodeClass(nodeId, cycleDetected) {
+            if (cycleDetected && currentState.visitedNodes.includes(nodeId)) {
+                return 'cycle';
+            } else if (currentState.currentNodes.includes(nodeId)) {
+                return currentState.hopNumber === 0 ? 'query-node' : 'current-hop';
+            } else if (currentState.visitedNodes.includes(nodeId)) {
+                return 'visited';
+            }
+            return '';
+        }
+
+        // Update threshold display
+        function updateThresholdDisplay() {
+            const threshold = document.getElementById('threshold')?.value || '0.7';
+            document.getElementById('thresholdDisplay').textContent = parseFloat(threshold).toFixed(2);
+            updateDynamicThresholdDisplay();
+        }
+
+        // Update weight reduction display
+        function updateWeightReductionDisplay() {
+            const weightReduction = document.getElementById('hopWeightReduction')?.value || '0.15';
+            document.getElementById('weightReductionDisplay').textContent = parseFloat(weightReduction).toFixed(2);
+            updateDynamicThresholdDisplay();
+        }
+
+        // Update dynamic threshold display
+        function updateDynamicThresholdDisplay() {
+            const thresholdEl = document.getElementById('threshold');
+            const weightReductionEl = document.getElementById('hopWeightReduction');
+            const dynamicThresholdEl = document.getElementById('dynamicThreshold');
+            
+            if (thresholdEl && weightReductionEl && dynamicThresholdEl) {
+                const baseThreshold = parseFloat(thresholdEl?.value || '0.7');
+                const weightIncrease = parseFloat(weightReductionEl?.value || '0.15');
+                const dynamicThreshold = Math.min(1.0, baseThreshold + (currentState.hopNumber * weightIncrease));
+                dynamicThresholdEl.textContent = dynamicThreshold.toFixed(3);
+            }
+        }
+
+        // Auto-expansion functions
+        function updateExpansionDelay() {
+            const delay = document.getElementById('expansionDelay').value;
+            document.getElementById('expansionDelayDisplay').textContent = delay + 'ms';
+        }
+
+        function updateExpansionStatus(status, color = '#7f8c8d') {
+            const statusElement = document.getElementById('expansionStatus');
+            if (statusElement) {
+                statusElement.textContent = status;
+                statusElement.style.color = color;
+            }
+        }
+
+        function updateExpansionProgress() {
+            const progressElement = document.getElementById('expansionProgress');
+            const targetElement = document.getElementById('expansionTarget');
+            const maxNodesElement = document.getElementById('maxNodes');
+            
+            if (progressElement && targetElement && maxNodesElement) {
+                const maxNodes = parseInt(maxNodesElement.value);
+                progressElement.textContent = currentState.visitedNodes.length;
+                targetElement.textContent = maxNodes;
+            }
+        }
+
+        async function startAutoExpansion() {
+            console.log('🔄 startAutoExpansion called, autoExpansionRunning:', autoExpansionRunning);
+            
+            if (autoExpansionRunning) {
+                console.log('Auto expansion already running, skipping');
+                return;
+            }
+            
+            autoExpansionRunning = true;
+            const stopBtn = document.getElementById('stopExpansionBtn');
+            if (stopBtn) stopBtn.disabled = false;
+            updateExpansionStatus('Expanding...', '#f39c12');
+            
+            console.log('Starting auto expansion loop...');
+            console.log('Current state:', {
+                visitedNodes: currentState.visitedNodes.length,
+                currentNodes: currentState.currentNodes.length,
+                hopNumber: currentState.hopNumber
+            });
+            
+            try {
+                const maxNodes = parseInt(document.getElementById('maxNodes')?.value || '100');
+                console.log('Max nodes limit:', maxNodes);
+                
+                while (autoExpansionRunning && currentState.visitedNodes.length < maxNodes) {
+                    console.log(`Hop ${currentState.hopNumber + 1}: Performing single hop...`);
+                    const expansionResult = await performSingleHop();
+                    console.log('Hop result:', expansionResult);
+                    
+                    if (!expansionResult || expansionResult.hop_complete) {
+                        console.log('Expansion complete or no result');
+                        break;
+                    }
+                    
+                    updateExpansionProgress();
+                    
+                    // Wait for the specified delay
+                    const delay = parseInt(document.getElementById('expansionDelay')?.value || '1500');
+                    console.log(`Waiting ${delay}ms before next hop...`);
+                    await new Promise(resolve => {
+                        autoExpansionTimeout = setTimeout(resolve, delay);
+                    });
+                }
+                
+                if (autoExpansionRunning) {
+                    console.log('Auto expansion completed successfully');
+                    updateExpansionStatus('Complete', '#27ae60');
+                }
+            } catch (error) {
+                console.error('Auto-expansion error:', error);
+                updateExpansionStatus('Error', '#e74c3c');
+            } finally {
+                autoExpansionRunning = false;
+                document.getElementById('stopExpansionBtn').disabled = true;
+            }
+        }
+
+        function stopExpansion() {
+            autoExpansionRunning = false;
+            if (autoExpansionTimeout) {
+                clearTimeout(autoExpansionTimeout);
+                autoExpansionTimeout = null;
+            }
+            updateExpansionStatus('Stopped', '#e67e22');
+            document.getElementById('stopExpansionBtn').disabled = true;
+            document.getElementById('answerBtn').disabled = false;
+        }
+
+        async function performSingleHop() {
+            const baseThreshold = parseFloat(document.getElementById('threshold')?.value || '0.7');
+            const weightReduction = parseFloat(document.getElementById('hopWeightReduction')?.value || '0.15');
+            const dynamicThreshold = Math.min(1.0, baseThreshold + (currentState.hopNumber * weightReduction));
+            const traversalDirection = document.getElementById('traversalDirection')?.value || 'bidirectional';
+            
+            try {
+                const maxNodes = parseInt(document.getElementById('maxNodes')?.value || '100');
+                const response = await apiCall('/hop', {
+                    current_nodes: currentState.currentNodes,
+                    visited_nodes: currentState.visitedNodes,
+                    context_window: currentState.contextWindow,
+                    query_embedding: currentState.queryEmbedding,
+                    threshold: dynamicThreshold,
+                    hop_number: currentState.hopNumber + 1,
+                    max_nodes: maxNodes,
+                    direction: traversalDirection
+                });
+
+                // Update state
+                currentState.hopNumber += 1;
+                currentState.currentNodes = response.next_nodes.map(n => n.id);
+                currentState.visitedNodes = [...currentState.visitedNodes, ...currentState.currentNodes];
+                currentState.contextWindow = [...currentState.contextWindow, ...response.new_context];
+
+                // Update UI
+                updateHopInfo();
+                updateContextWindow();
+                updateDynamicThresholdDisplay();
+                
+                visualizeGraph(response.next_nodes, response.hop_edges || [], response.cycle_detected, true);
+
+                return response;
+            } catch (error) {
+                console.error('Single hop error:', error);
+                return null;
+            }
+        }
+
+        // Query rewriter functions
+        async function rewriteQuery() {
+            const queryInput = document.getElementById('queryInput');
+            const rewriteBtn = document.getElementById('rewriteBtn');
+            
+            // Validate DOM elements exist
+            if (!queryInput) {
+                alert('Query input field not found');
+                return;
+            }
+            if (!rewriteBtn) {
+                alert('Rewrite button not found');
+                return;
+            }
+
+            const originalQuery = queryInput?.value || '';
+            const originalText = rewriteBtn.innerHTML;
+
+            if (!originalQuery.trim()) {
+                alert('Please enter a query to rewrite');
+                return;
+            }
+
+            // Show loading state
+            rewriteBtn.innerHTML = '<span class="loading"></span> Enhancing & Processing...';
+            rewriteBtn.disabled = true;
+
+            try {
+                // Step 1: Get enhanced query
+                const rewriteResponse = await apiCall('/rewrite-query', {
+                    query: originalQuery,
+                    edge_threshold: 30
+                });
+
+                console.log('Query rewrite response:', rewriteResponse);
+
+                // Step 2: Immediately swap the query input with enhanced version
+                if (queryInput) queryInput.value = rewriteResponse.rewritten_query;
+                
+                // Step 3: Show rewriter status section (with null checks)
+                const rewriterSection = document.getElementById('rewriterSection');
+                const highDegreeCount = document.getElementById('highDegreeCount');
+                const suggestedEntities = document.getElementById('suggestedEntities');
+                const originalQuerySpan = document.getElementById('originalQuery');
+
+                if (rewriterSection) rewriterSection.style.display = 'block';
+                if (highDegreeCount) highDegreeCount.textContent = rewriteResponse.high_degree_nodes.length;
+                if (suggestedEntities) {
+                    suggestedEntities.textContent = 
+                        rewriteResponse.high_degree_nodes.slice(0, 3).map(n => n.id).join(', ') || 'None';
+                }
+                if (originalQuerySpan) originalQuerySpan.textContent = originalQuery;
+                
+                // Show the enhanced query
+                const enhancedQuerySpan = document.getElementById('enhancedQuery');
+                if (enhancedQuerySpan) enhancedQuerySpan.textContent = rewriteResponse.rewritten_query;
+
+                // Step 4: Automatically process the enhanced query
+                // Use the same approach as processQuery() function
+                const folderPath = document.getElementById('folderPath')?.value || '';
+                const topK = parseInt(document.getElementById('topK')?.value || '5');
+                const threshold = parseFloat(document.getElementById('threshold')?.value || '0.7');
+                const maxNodes = parseInt(document.getElementById('maxNodes')?.value || '100');
+
+                if (!folderPath.trim()) {
+                    alert('Please initialize the system first');
+                    return;
+                }
+
+                // Show loading for graph
+                showLoading('graphLoading', 'Processing enhanced query...');
+
+                const apiResponse = await apiCall('/query', {
+                    query: rewriteResponse.rewritten_query,
+                    folder_path: folderPath,
+                    threshold: threshold,
+                    top_k: topK,
+                    max_nodes: maxNodes
+                });
+
+                // Update current state
+                currentState.query = rewriteResponse.rewritten_query;
+                currentState.currentNodes = apiResponse.top_nodes.map(n => n.id);
+                currentState.visitedNodes = apiResponse.hop_data.visited_nodes;
+                currentState.contextWindow = apiResponse.context_window;
+                currentState.queryEmbedding = apiResponse.hop_data.query_embedding;
+                currentState.hopNumber = 0;
+
+                // Update UI
+                updateQueryAnalysis(apiResponse);
+                updateHopInfo();
+                updateContextWindow();
+                
+                await new Promise(resolve => setTimeout(resolve, 500));
+                visualizeGraph(apiResponse.top_nodes, [], false, false);
+                
+                // Enable hopping controls
+                const hopBtn = document.getElementById('hopBtn');
+                const answerBtn = document.getElementById('answerBtn');
+                if (hopBtn) hopBtn.disabled = false;
+                if (answerBtn) answerBtn.disabled = false;
+
+                hideLoading('graphLoading');
+
+            } catch (error) {
+                console.error('Rewrite error:', error);
+                alert(`Error rewriting and processing query: ${error.message}`);
+                // Restore original query on error
+                if (queryInput) queryInput.value = originalQuery;
+            } finally {
+                if (rewriteBtn) {
+                    rewriteBtn.innerHTML = originalText;
+                    rewriteBtn.disabled = false;
+                }
+            }
+        }
+
+        // Internal function for processing query (used by both regular and rewrite flows)
+        async function processQueryInternal(queryText) {
+            // Validate inputs with null checks - use bottom elements if top elements don't exist
+            const topKElement = document.getElementById('topK') || document.getElementById('topKBottom');
+            const maxNodesElement = document.getElementById('maxNodes');
+            const thresholdElement = document.getElementById('threshold');
+            const folderPathElement = document.getElementById('folderPath');
+
+            // Debug: Log which elements are missing
+            const missingElements = [];
+            if (!topKElement) missingElements.push('topK/topKBottom');
+            if (!maxNodesElement) missingElements.push('maxNodes');
+            if (!thresholdElement) missingElements.push('threshold');
+            if (!folderPathElement) missingElements.push('folderPath');
+            
+            if (missingElements.length > 0) {
+                console.error('Missing form elements:', missingElements);
+                throw new Error(`Required form elements not found: ${missingElements.join(', ')}`);
+            }
+
+            const topK = parseInt(topKElement?.value || '5');
+            const maxNodes = parseInt(maxNodesElement?.value || '100');
+            const threshold = parseFloat(thresholdElement?.value || '0.7');
+            const folderPath = folderPathElement?.value || '';
+
+            // Show loading for graph
+            showLoading('graphLoading', 'Extracting keywords and computing embeddings...');
+
+            try {
+                const response = await apiCall('/query', {
+                    query: queryText,
+                    folder_path: folderPath,
+                    threshold: threshold,
+                    top_k: topK,
+                    max_nodes: maxNodes
+                });
+
+                // Update current state
+                currentState.query = queryText;
+                currentState.currentNodes = response.top_nodes.map(n => n.id);
+                currentState.visitedNodes = response.hop_data.visited_nodes;
+                currentState.contextWindow = response.context_window;
+                currentState.queryEmbedding = response.hop_data.query_embedding;
+                currentState.hopNumber = 0;
+
+                // Update query analysis UI
+                updateQueryAnalysis(response);
+                
+                // Update UI
+                updateHopInfo();
+                updateContextWindow();
+                
+                // Update loading message and visualize
+                showLoading('graphLoading', 'Rendering graph visualization...');
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                visualizeGraph(response.top_nodes, [], false, false);
+                
+                // Update expansion progress
+                updateExpansionProgress();
+                
+                // Add status update to chat
+                const maxNodesEl = document.getElementById('maxNodes');
+                const dynamicThresholdEl = document.getElementById('dynamicThreshold');
+                const maxNodes = maxNodesEl ? parseInt(maxNodesEl.value) : 100;
+                const threshold = dynamicThresholdEl ? dynamicThresholdEl.textContent : '0.700';
+                
+                const statusText = `Current hop: ${currentState.hopNumber}<br>
+                                   Total nodes: ${currentState.visitedNodes.length}/${maxNodes}<br>
+                                   Context items: ${currentState.contextWindow.length}<br>
+                                   Threshold: ${threshold}`;
+                addMessageToChat(statusText, false, 'status');
+
+            } finally {
+                hideLoading('graphLoading');
+            }
+        }
+
+        // Check for rewriter enablement
+        function checkRewriterAvailability() {
+            const enableRewriter = document.getElementById('enableRewriter').checked;
+            const queryInput = document.getElementById('queryInput')?.value || '';
+            const rewriteBtn = document.getElementById('rewriteBtn');
+            
+            if (enableRewriter && queryInput.trim()) {
+                rewriteBtn.style.display = 'inline-block';
+                rewriteBtn.disabled = false;
+            } else {
+                rewriteBtn.style.display = 'none';
+                rewriteBtn.disabled = true;
+            }
+        }
+
+        // Chat interface functions
+        function addMessageToChat(content, isUser = false, type = 'message') {
+            const chatMessages = document.getElementById('chatMessages');
+            if (!chatMessages) {
+                console.error('Chat messages container not found');
+                return;
+            }
+            
+            const messageDiv = document.createElement('div');
+            
+            if (type === 'analysis') {
+                messageDiv.className = 'query-analysis';
+                messageDiv.innerHTML = `<strong>🔍 Query Analysis:</strong><br>${content}`;
+            } else if (type === 'status') {
+                messageDiv.className = 'exploration-status';
+                messageDiv.innerHTML = `<strong>📊 Exploration Status:</strong><br>${content}`;
+            } else {
+                messageDiv.className = isUser ? 'message user-message' : 'message assistant-message';
+                messageDiv.innerHTML = content;
+            }
+            
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            
+            // Remove welcome message if it exists
+            const welcomeMsg = chatMessages.querySelector('div[style*="text-align: center"]');
+            if (welcomeMsg) {
+                welcomeMsg.remove();
+            }
+        }
+        
+        function addLoadingMessage() {
+            const chatMessages = document.getElementById('chatMessages');
+            if (!chatMessages) {
+                console.error('Chat messages container not found');
+                return null;
+            }
+            
+            const loadingDiv = document.createElement('div');
+            loadingDiv.className = 'message assistant-message';
+            loadingDiv.id = 'loadingMessage';
+            loadingDiv.innerHTML = '<div class="loading"></div> <span style="margin-left: 10px;">Processing your question...</span>';
+            chatMessages.appendChild(loadingDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            return loadingDiv;
+        }
+        
+        function removeLoadingMessage() {
+            const loadingMsg = document.getElementById('loadingMessage');
+            if (loadingMsg) {
+                loadingMsg.remove();
+            }
+        }
+
+        async function processQueryFromBottom() {
+            console.log('🔍 processQueryFromBottom called');
+            
+            const queryInput = document.getElementById('queryInputBottom');
+            console.log('queryInput element:', queryInput);
+
+            if (!queryInput || !queryInput.value?.trim()) {
+                alert('Please enter a question');
+                return;
+            }
+
+            const userQuery = queryInput.value?.trim() || '';
+            console.log('User query:', userQuery);
+            
+            // Debug: Check if required elements exist
+            const requiredElements = ['topK', 'topKBottom', 'maxNodes', 'threshold', 'folderPath'];
+            const elementStatus = {};
+            requiredElements.forEach(id => {
+                const element = document.getElementById(id);
+                elementStatus[id] = element ? 'found' : 'missing';
+            });
+            console.log('Element status before processQueryInternal:', elementStatus);
+            
+            // Add user message to chat
+            addMessageToChat(userQuery, true);
+            
+            // Clear input
+            if (queryInput) queryInput.value = '';
+            
+            // Show loading message
+            const loadingMsg = addLoadingMessage();
+            
+            // Disable input while processing
+            const queryBtn = document.getElementById('queryBtnBottom');
+            if (queryBtn) queryBtn.disabled = true;
+            queryInput.disabled = true;
+
+            try {
+                console.log('Calling processQueryInternal...');
+                await processQueryInternal(userQuery);
+                
+                // Show context query section after successful processing
+                const contextQuerySection = document.getElementById('contextQuerySection');
+                if (contextQuerySection) {
+                    contextQuerySection.style.display = 'block';
+                }
+                
+                // Check hopping mode and proceed accordingly
+                const hoppingMode = document.getElementById('hoppingMode');
+                if (hoppingMode && hoppingMode.value === 'auto') {
+                    removeLoadingMessage();
+                    addMessageToChat('🔄 Starting auto-exploration of the knowledge graph...', false);
+                    await startAutoExpansion();
+                    addMessageToChat('✅ Graph exploration completed! Generating comprehensive answer...', false);
+                    await generateAnswerToChat();
+                } else {
+                    removeLoadingMessage();
+                    addMessageToChat('📋 Query processed! Use manual hopping controls or generate answer directly.', false);
+                    // Enable manual hopping controls
+                    const hopBtn = document.getElementById('hopBtn');
+                    const answerBtn = document.getElementById('answerBtn');
+                    if (hopBtn) hopBtn.disabled = false;
+                    if (answerBtn) answerBtn.disabled = false;
+                }
+            } catch (error) {
+                removeLoadingMessage();
+                addMessageToChat(`❌ Error processing your question: ${error.message}`, false);
+            } finally {
+                queryBtn.disabled = false;
+                queryInput.disabled = false;
+            }
+        }
+        
+        async function generateAnswerToChat() {
+            try {
+                const response = await apiCall('/answer', {
+                    query: currentState.query,
+                    context_window: currentState.contextWindow
+                });
+                
+                addMessageToChat(response.answer, false);
+            } catch (error) {
+                addMessageToChat(`❌ Error generating answer: ${error.message}`, false);
+            }
+        }
+
+        async function rewriteQueryFromBottom() {
+            const queryInput = document.getElementById('queryInputBottom');
+            const rewriteBtn = document.getElementById('rewriteBtnBottom');
+            
+            if (!queryInput || !rewriteBtn) {
+                alert('Query input elements not found');
+                return;
+            }
+
+            const originalQuery = queryInput?.value || '';
+            const originalText = rewriteBtn.innerHTML;
+
+            if (!originalQuery.trim()) {
+                alert('Please enter a query to rewrite');
+                return;
+            }
+
+            // Show loading state
+            rewriteBtn.innerHTML = '<span class="loading"></span> Enhancing & Processing...';
+            rewriteBtn.disabled = true;
+
+            try {
+                // Step 1: Get enhanced query
+                const rewriteResponse = await apiCall('/rewrite-query', {
+                    query: originalQuery,
+                    edge_threshold: 30
+                });
+
+                console.log('Query rewrite response:', rewriteResponse);
+
+                // Step 2: Immediately swap the query input with enhanced version
+                queryInput.value = rewriteResponse.rewritten_query;
+                
+                // Step 3: Show rewriter status section
+                const rewriterSection = document.getElementById('rewriterSection');
+                const highDegreeCount = document.getElementById('highDegreeCount');
+                const suggestedEntities = document.getElementById('suggestedEntities');
+                const originalQuerySpan = document.getElementById('originalQuery');
+                const enhancedQuerySpan = document.getElementById('enhancedQuery');
+
+                if (rewriterSection) rewriterSection.style.display = 'block';
+                if (highDegreeCount) highDegreeCount.textContent = rewriteResponse.high_degree_nodes.length;
+                if (suggestedEntities) {
+                    suggestedEntities.textContent = 
+                        rewriteResponse.high_degree_nodes.slice(0, 3).map(n => n.id).join(', ') || 'None';
+                }
+                if (originalQuerySpan) originalQuerySpan.textContent = originalQuery;
+                if (enhancedQuerySpan) enhancedQuerySpan.textContent = rewriteResponse.rewritten_query;
+
+                // Step 4: Update the query input with enhanced query
+                const queryInput = document.getElementById('queryInput');
+                if (queryInput) {
+                    queryInput.value = rewriteResponse.rewritten_query;
+                }
+                
+                alert('Query enhanced! Click "Process Query" to run the enhanced version.');
+                
+                // Show context query section
+                const contextQuerySection = document.getElementById('contextQuerySection');
+                if (contextQuerySection) {
+                    contextQuerySection.style.display = 'block';
+                }
+                
+                // Start auto-expansion if in auto mode
+                const hoppingMode = document.getElementById('hoppingMode');
+                if (hoppingMode && hoppingMode.value === 'auto') {
+                    await startAutoExpansion();
+                }
+
+            } catch (error) {
+                console.error('Rewrite error:', error);
+                alert(`Error rewriting and processing query: ${error.message}`);
+                if (queryInput) queryInput.value = originalQuery;
+            } finally {
+                if (rewriteBtn) {
+                    rewriteBtn.innerHTML = originalText;
+                    rewriteBtn.disabled = false;
+                }
+            }
+        }
+
+        // Toggle between manual and automatic hopping modes
+        function toggleHoppingMode() {
+            const hoppingMode = document.getElementById('hoppingMode');
+            const autoExpansionSettings = document.getElementById('autoExpansionSettings');
+            const manualHoppingSettings = document.getElementById('manualHoppingSettings');
+            
+            if (!hoppingMode || !autoExpansionSettings || !manualHoppingSettings) {
+                console.error('Hopping mode elements not found');
+                return;
+            }
+            
+            if (hoppingMode.value === 'auto') {
+                // Show auto-expansion settings, hide manual hopping
+                autoExpansionSettings.style.display = 'block';
+                manualHoppingSettings.style.display = 'none';
+                console.log('Switched to auto-expansion mode');
+            } else {
+                // Show manual hopping settings, hide auto-expansion
+                autoExpansionSettings.style.display = 'none';
+                manualHoppingSettings.style.display = 'block';
+                console.log('Switched to manual hopping mode');
+            }
+        }
+
+        // Apply physics layout with custom settings
+        function applyPhysics() {
+            if (!cy) {
+                console.error('Cytoscape not initialized');
+                return;
+            }
+            
+            const nodeRepulsion = parseFloat(document.getElementById('nodeRepulsion')?.value || '4500');
+            const edgeLength = parseFloat(document.getElementById('edgeLength')?.value || '150');
+            
+            applyPhysicsLayout(nodeRepulsion, edgeLength);
+        }
+        
+        // Apply physics layout helper function
+        function applyPhysicsLayout(nodeRepulsion, edgeLength) {
+            if (!cy) return;
+            
+            const layout = cy.layout({
+                name: 'cose',
+                randomize: false,
+                idealEdgeLength: edgeLength,
+                nodeRepulsion: nodeRepulsion,
+                refresh: 20,
+                fit: true,
+                padding: 40,
+                animate: true,
+                animationDuration: 1000,
+                animationEasing: 'ease-out'
+            });
+            
+            layout.run();
+            
+            // Update display
+            const currentLayoutDisplay = document.getElementById('currentLayoutDisplay');
+            if (currentLayoutDisplay) {
+                currentLayoutDisplay.textContent = 'COSE (Physics)';
+            }
+        }
+        
+        // Update physics display values
+        function updatePhysicsDisplay() {
+            const nodeRepulsion = document.getElementById('nodeRepulsion')?.value || '4500';
+            const edgeLength = document.getElementById('edgeLength')?.value || '150';
+            
+            const nodeRepulsionDisplay = document.getElementById('nodeRepulsionDisplay');
+            const edgeLengthDisplay = document.getElementById('edgeLengthDisplay');
+            
+            if (nodeRepulsionDisplay) nodeRepulsionDisplay.textContent = nodeRepulsion;
+            if (edgeLengthDisplay) edgeLengthDisplay.textContent = edgeLength;
+        }
+
+        // Check for rewriter enablement (bottom version)
+        function checkRewriterAvailabilityBottom() {
+            const enableRewriter = document.getElementById('enableRewriterBottom');
+            const queryInput = document.getElementById('queryInputBottom');
+            const rewriteBtn = document.getElementById('rewriteBtnBottom');
+            
+            if (!enableRewriter || !queryInput || !rewriteBtn) return;
+            
+            if (enableRewriter.checked && queryInput.value?.trim()) {
+                rewriteBtn.style.display = 'inline-block';
+                rewriteBtn.disabled = false;
+            } else {
+                rewriteBtn.style.display = 'none';
+                rewriteBtn.disabled = true;
+            }
+        }
+
+        // Initialize on page load
+        window.onload = function() {
+            console.log('Initializing page...');
+            
+            // Wait for DOM to be fully ready
+            setTimeout(() => {
+                try {
+                    // Verify all critical elements exist
+                    const criticalElements = [
+                        'threshold', 'hopWeightReduction', 'cy', 'rewriterSection',
+                        'maxNodes', 'maxNodesDisplay', 'contextQuery', 'contextQueryBtn',
+                        'hoppingMode', 'expansionDelay', 'stopExpansionBtn', 'enablePhysics',
+                        'nodeRepulsion', 'edgeLength', 'folderPath', 'topK', 'queryInput',
+                        'queryBtn', 'rewriteBtn', 'enableRewriter', 'answerSection',
+                        'contextWindow', 'explorationPath'
+                    ];
+                    
+                    const missingElements = criticalElements.filter(id => !document.getElementById(id));
+                    if (missingElements.length > 0) {
+                        console.error('Missing DOM elements:', missingElements);
+                        alert(`Missing page elements: ${missingElements.join(', ')}. Please refresh the page.`);
+                        return;
+                    }
+                    
+                    // Initialize Cytoscape
+                    initializeCytoscape();
+                    console.log('Cytoscape initialized successfully');
+                    
+                    updateThresholdDisplay();
+                    updateWeightReductionDisplay();
+                    updateExpansionDelay();
+                    updatePhysicsDisplay();
+                    toggleHoppingMode(); // Set initial hopping mode display
+                    
+                    // Query button already enabled in initializeSystem
+                    
+                    // Initialize rewriter availability check
+                    checkRewriterAvailability();
+                    
+                    // Add event listeners with null checks
+                    const enableRewriter = document.getElementById('enableRewriter');
+                    const queryInput = document.getElementById('queryInput');
+                    const maxNodes = document.getElementById('maxNodes');
+                    const contextQuery = document.getElementById('contextQuery');
+                    
+                    if (enableRewriter) {
+                        enableRewriter.addEventListener('change', checkRewriterAvailability);
+                    }
+                    if (queryInput) {
+                        queryInput.addEventListener('input', checkRewriterAvailability);
+                        queryInput.addEventListener('keypress', function(e) {
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                                e.preventDefault();
+                                processQuery();
+                            }
+                        });
+                    }
+                    if (maxNodes) {
+                        maxNodes.addEventListener('input', function() {
+                            updateHopInfo(); // Update display when maxNodes changes
+                        });
+                    }
+                    if (contextQuery) {
+                        contextQuery.addEventListener('keypress', function(e) {
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                                e.preventDefault();
+                                queryOnContext();
+                            }
+                        });
+                    }
+                    
+                    console.log('Page initialization complete');
+                    
+                } catch (error) {
+                    console.error('Failed to initialize page:', error);
+                    alert('Page initialization failed. Please refresh the page.');
+                }
+            }, 100); // Small delay to ensure DOM is ready
+        };
+    </script>
+</body>
+</html>
