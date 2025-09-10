@@ -155,7 +155,11 @@ Subcategories:
             if cached_result:
                 try:
                     import json
-                    return json.loads(cached_result.get("return", "[]"))
+                    cached_return = cached_result.get("return", "[]")
+                    if isinstance(cached_return, str):
+                        return json.loads(cached_return)
+                    elif isinstance(cached_return, list):
+                        return cached_return
                 except (json.JSONDecodeError, ValueError):
                     pass
         

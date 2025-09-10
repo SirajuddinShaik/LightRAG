@@ -534,12 +534,6 @@
         <div class="left-panel">
             <!-- Initialization -->
             <div class="control-group">
-                <h3>🚀 Initialize System</h3>
-                <div class="form-group">
-                    <label for="folderPath">Data Folder Path:</label>
-                    <input type="text" id="folderPath" value="/Users/shaik.s/Desktop/LightRAG/" placeholder="Enter folder path">
-                </div>
-                <button onclick="initializeSystem()">Initialize Graph Data</button>
                 <button onclick="showCompleteGraph()" id="showGraphBtn" disabled style="background: linear-gradient(45deg, #9b59b6, #8e44ad); margin-top: 8px;">
                     🌐 Show Complete Graph
                 </button>
@@ -555,7 +549,7 @@
                 </div>
                 <div class="form-group">
                     <label for="topK">Top K Nodes:</label>
-                    <input type="number" id="topK" value="5" min="1" max="20" style="width: 100%;">
+                    <input type="number" id="topK" value="15" min="1" max="20" style="width: 100%;">
                 </div>
                 <div style="display: flex; gap: 5px; margin-bottom: 8px;">
                     <label style="display: flex; align-items: center; font-size: 11px;">
@@ -574,8 +568,8 @@
                 <h3>⚙️ Exploration Settings</h3>
                 <div class="form-group">
                     <label for="threshold">Similarity Threshold:</label>
-                    <input type="range" id="threshold" min="0" max="1" step="0.05" value="0.7" oninput="updateThresholdDisplay()">
-                    <div class="threshold-display" id="thresholdDisplay">0.70</div>
+                    <input type="range" id="threshold" min="0" max="1" step="0.05" value="0.35" oninput="updateThresholdDisplay()">
+                    <div class="threshold-display" id="thresholdDisplay">0.35</div>
                     <small style="color: #7f8c8d; font-size: 10px;">Higher values = more selective exploration</small>
                 </div>
                 <div class="form-group">
@@ -584,8 +578,8 @@
                 </div>
                 <div class="form-group">
                     <label for="hopWeightReduction">Hop Threshold Increase:</label>
-                    <input type="range" id="hopWeightReduction" min="0.05" max="0.3" step="0.05" value="0.15" oninput="updateWeightReductionDisplay()">
-                    <div class="threshold-display" id="weightReductionDisplay">0.15</div>
+                    <input type="range" id="hopWeightReduction" min="0.05" max="0.3" step="0.01" value="0.10" oninput="updateWeightReductionDisplay()">
+                    <div class="threshold-display" id="weightReductionDisplay">0.10</div>
                 </div>
                 <div class="form-group">
                     <label for="traversalDirection">Edge Traversal Direction:</label>
@@ -637,9 +631,6 @@
                     <button onclick="performHop()" id="hopBtn" disabled style="background: linear-gradient(45deg, #27ae60, #229954);">
                         🚀 Next Hop
                     </button>
-                    <button onclick="generateAnswer()" id="answerBtn" disabled class="btn-success">
-                        🤖 Generate Answer
-                    </button>
                 </div>
                 <div class="hop-info" style="margin-top: 10px;">
                     <div style="font-size: 11px; text-align: center; color: #7f8c8d;">
@@ -649,7 +640,7 @@
             </div>
 
             <!-- Physics Controls -->
-            <div class="control-group">
+            <div class="control-group" style="display: none;">
                 <h3>⚡ Physics Settings</h3>
                 <div class="form-group">
                     <label for="enablePhysics">
@@ -712,12 +703,21 @@
                         </div>
                     </div>
                 </div>
+            <h3>🚀 Initialize System</h3>
+                <div class="form-group">
+                    <label for="folderPath">Data Folder Path:</label>
+                    <input type="text" id="folderPath" value="/Users/shaik.s/Desktop/LightRAG/" placeholder="Enter folder path">
+                </div>
+            <button onclick="initializeSystem()">Initialize Graph Data</button>
             </div>
         </div>
 
         <div class="right-panel">
             <!-- Answer Section -->
             <div class="control-group">
+                    <button onclick="generateAnswer()" id="answerBtn" disabled class="btn-success">
+                        🤖 Generate Answer
+                    </button>
                 <h3>🤖 Query Results</h3>
                 <div id="answerPlaceholder" class="answer-section" style="padding: 20px; text-align: center; color: #7f8c8d; font-style: italic;">
                     Process a query to see results here...
@@ -947,7 +947,7 @@
 
         // API calls
         async function apiCall(endpoint, data = null) {
-            const url = `http://localhost:8000${endpoint}`;
+            const url = `https://nice-shepherd-perfect.ngrok-free.app${endpoint}`;
             const options = {
                 method: data ? 'POST' : 'GET',
                 headers: { 'Content-Type': 'application/json' }
@@ -1025,7 +1025,7 @@
         async function processQuery() {
             const query = document.getElementById('queryInput')?.value || '';
             const folderPath = document.getElementById('folderPath')?.value || '';
-            const topK = parseInt(document.getElementById('topK')?.value || '5');
+            const topK = parseInt(document.getElementById('topK')?.value || '15');
             const threshold = parseFloat(document.getElementById('threshold')?.value || '0.7');
             const maxNodes = parseInt(document.getElementById('maxNodes')?.value || '100');
 
@@ -1761,7 +1761,7 @@
                 // Step 4: Automatically process the enhanced query
                 // Use the same approach as processQuery() function
                 const folderPath = document.getElementById('folderPath')?.value || '';
-                const topK = parseInt(document.getElementById('topK')?.value || '5');
+                const topK = parseInt(document.getElementById('topK')?.value || '15');
                 const threshold = parseFloat(document.getElementById('threshold')?.value || '0.7');
                 const maxNodes = parseInt(document.getElementById('maxNodes')?.value || '100');
 
@@ -2231,7 +2231,7 @@
                 
                 // Open the /show endpoint in a new window/tab
                 const graphWindow = window.open(
-                    'http://localhost:8000/show',
+                    'https://nice-shepherd-perfect.ngrok-free.app/show',
                     'lightrag_complete_graph',
                     'width=1400,height=900,scrollbars=yes,resizable=yes,toolbar=no,menubar=no,location=no,status=no'
                 );
@@ -2242,7 +2242,7 @@
                 } else {
                     // Fallback if popup was blocked
                     console.warn('Popup blocked, opening in same tab');
-                    window.location.href = 'http://localhost:8000/show';
+                    window.location.href = 'https://nice-shepherd-perfect.ngrok-free.app/show';
                 }
             } catch (error) {
                 console.error('Error opening complete graph:', error);

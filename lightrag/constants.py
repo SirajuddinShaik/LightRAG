@@ -24,11 +24,18 @@ DEFAULT_SUMMARY_LENGTH_RECOMMENDED = 600
 DEFAULT_SUMMARY_CONTEXT_SIZE = 12000
 # Default entities to extract if ENTITY_TYPES is not specified in .env
 DEFAULT_ENTITY_TYPES = [
-    "organization",
-    "person",
-    "geo",
-    "event",
-    "category",
+    "organization",      # Company, partner, vendor
+    "person",            # Employee, executive, contractor
+    "team",              # Department, squad, group
+    "project",           # Internal initiatives, OKRs
+    "document",          # Files, reports, wikis, notes
+    "product",           # Products, services, features
+    "event",             # Meetings, launches, training
+    "task",              # Tickets, issues, action items
+    "location",          # Office, HQ, remote site
+    "technology",        # Tools, tech stack, SaaS apps
+    "customer",          # Client, account, partner org
+    "KnowledgeBase",     # A collection of information, like a wiki or database
 ]
 
 # Separator for graph fields

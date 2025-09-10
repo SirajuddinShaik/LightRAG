@@ -34,7 +34,7 @@ app.add_middleware(
 )
 
 # Initialize embedding model
-embedding_model = SentenceTransformer('Qwen/Qwen3-Embedding-0.6B')
+embedding_model = SentenceTransformer('Qwen/Qwen3-Embedding-4B', device = "cuda:0")
 
 # Gemini Provider Class (same as test_hierarchical_grouping_gemini.py)
 class GeminiProvider:
@@ -214,7 +214,7 @@ class GraphData:
             batch_nodes = node_list[i:i + batch_size]
             
             # Compute embeddings for the batch
-            batch_embeddings = embedding_model.encode(batch_texts)
+            batch_embeddings = embedding_model.encode(batch_texts).to_device("cpu")
             
             # Assign embeddings to nodes
             for node, embedding in zip(batch_nodes, batch_embeddings):
@@ -229,7 +229,7 @@ class GraphData:
             batch_edges = self.edges[i:i + batch_size]
             
             # Compute embeddings for the batch
-            batch_embeddings = embedding_model.encode(batch_texts)
+            batch_embeddings = embedding_model.encode(batch_texts).to_device("cpu")
             
             # Assign embeddings to edges
             for edge, embedding in zip(batch_edges, batch_embeddings):
@@ -384,7 +384,7 @@ def find_keyword_matching_nodes(query: str, keywords: List[str], top_k: int = 5)
 
 def find_embedding_similar_nodes(query: str, top_k: int = 5) -> List[Tuple[str, float, str]]:
     """Find top-k most similar nodes to query using embeddings"""
-    query_embedding = embedding_model.encode(query)
+    query_embedding = embedding_model.encode(query).to_device("cpu")
     
     similarities = []
     for node_id, node in graph_data.nodes.items():
@@ -597,7 +597,7 @@ async def process_query(request: QueryRequest):
         hop_data = {
             "current_hop": 0,
             "visited_nodes": [node["id"] for node in top_nodes],
-            "query_embedding": embedding_model.encode(request.query).tolist(),
+            "query_embedding": embedding_model.encode(request.query).to_device("cpu").tolist(),
             "extracted_keywords": keywords
         }
         
@@ -1427,7 +1427,7 @@ async def show_whole_graph():
                 <h3><i class="fas fa-arrows-alt-h"></i> Relationship Details</h3>
                 <p><strong><i class="fas fa-play"></i> From:</strong> ${{data.source}}</p>
                 <p><strong><i class="fas fa-stop"></i> To:</strong> ${{data.target}}</p>
-                <p><strong><i class="fas fa-tags"></i> Keywords:</strong> ${{data.keywords}}</p>
+                <p><strong><i class="fas fa-tags"></i> Relation:</strong> ${{data.keywords}}</p>
                 <p><strong><i class="fas fa-weight-hanging"></i> Weight:</strong> ${{data.weight}}</p>
                 <p><strong><i class="fas fa-info-circle"></i> Description:</strong></p>
                 <p style="font-style: italic; max-height: 250px; overflow-y: auto; padding: 10px; background: #f8f9fa; border-radius: 8px;">${{data.description}}</p>
@@ -1639,4 +1639,4 @@ async def serve_frontend():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=7888)

@@ -80,3 +80,8 @@ data
 
 cytos*
 vespa*
+
+hf_cache
+outputs
+data
+make_live
