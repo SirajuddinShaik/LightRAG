@@ -77,3 +77,6 @@ memory-bank/
 hf_cache
 outputs
 data
+
+cytos*
+vespa*

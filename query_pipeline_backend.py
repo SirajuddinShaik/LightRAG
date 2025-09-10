@@ -18,6 +18,7 @@ import os
 import asyncio
 from pathlib import Path
 from dotenv import load_dotenv
+from datetime import datetime
 
 load_dotenv()
 
@@ -234,8 +235,54 @@ class GraphData:
             for edge, embedding in zip(batch_edges, batch_embeddings):
                 edge.embedding = embedding
 
-# Global graph data
+# Global graph data and persistence
 graph_data = GraphData()
+_last_folder_path = None
+_persistence_file = "query_pipeline_state.json"
+
+def save_persistence_state():
+    """Save current state to persistence file"""
+    global _last_folder_path
+    try:
+        state = {
+            "last_folder_path": _last_folder_path,
+            "nodes_count": len(graph_data.nodes),
+            "edges_count": len(graph_data.edges),
+            "timestamp": str(datetime.now())
+        }
+        with open(_persistence_file, 'w') as f:
+            json.dump(state, f, indent=2)
+        print(f"State persisted: {state}")
+    except Exception as e:
+        print(f"Failed to save persistence state: {e}")
+
+def load_persistence_state():
+    """Load and restore state from persistence file"""
+    global _last_folder_path
+    try:
+        if Path(_persistence_file).exists():
+            with open(_persistence_file, 'r') as f:
+                state = json.load(f)
+            
+            _last_folder_path = state.get("last_folder_path")
+            print(f"Found persistence state: {state}")
+            
+            # Try to auto-load from last used path
+            if _last_folder_path and Path(_last_folder_path).exists():
+                print(f"Auto-loading graph data from: {_last_folder_path}")
+                graph_data.load_from_files(_last_folder_path)
+                print(f"Auto-loaded: {len(graph_data.nodes)} nodes, {len(graph_data.edges)} edges")
+                return True
+    except Exception as e:
+        print(f"Failed to load persistence state: {e}")
+    return False
+
+# Auto-load on startup
+auto_loaded = load_persistence_state()
+if auto_loaded:
+    print("✅ System initialized with persisted data")
+else:
+    print("🔄 System starting fresh - no persisted data found")
 
 # Request/Response models
 class QueryRequest(BaseModel):
@@ -485,17 +532,24 @@ def get_adjacent_nodes_with_similarity(current_nodes: List[str], query_embedding
 @app.post("/initialize", response_model=dict)
 async def initialize_graph(request: dict):
     """Initialize graph data from folder"""
+    global _last_folder_path
     folder_path = request.get("folder_path")
     if not folder_path:
         raise HTTPException(status_code=400, detail="folder_path is required")
     
     try:
         graph_data.load_from_files(folder_path)
+        
+        # Save persistence state
+        _last_folder_path = folder_path
+        save_persistence_state()
+        
         return {
             "status": "success",
             "nodes_count": len(graph_data.nodes),
             "edges_count": len(graph_data.edges),
-            "message": "Graph data loaded successfully"
+            "message": "Graph data loaded successfully",
+            "persisted": True
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error loading graph data: {str(e)}")
@@ -740,6 +794,836 @@ async def get_graph_stats():
         "high_degree_nodes_40": len([d for d in node_degrees.values() if d >= 40]),
         "max_degree": max(node_degrees.values()) if node_degrees else 0
     }
+
+@app.get("/status")
+async def get_system_status():
+    """Get current system status including data loading state"""
+    try:
+        has_data = len(graph_data.nodes) > 0 and len(graph_data.edges) > 0
+        
+        return {
+            "status": "ready" if has_data else "uninitialized",
+            "has_data": has_data,
+            "nodes_count": len(graph_data.nodes),
+            "edges_count": len(graph_data.edges),
+            "chunks_count": len(graph_data.chunks_data),
+            "entities_count": len(graph_data.entities_data),
+            "last_folder_path": _last_folder_path,
+            "message": "Graph data loaded and ready" if has_data else "No graph data loaded"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error checking status: {str(e)}")
+
+@app.delete("/delete")
+async def clear_all_data():
+    """Clear all loaded graph data"""
+    try:
+        # Clear all data structures
+        graph_data.nodes.clear()
+        graph_data.edges.clear()
+        graph_data.graph.clear()
+        graph_data.directed_graph.clear()
+        graph_data.chunks_data.clear()
+        graph_data.entities_data.clear()
+        
+        return {
+            "status": "success",
+            "message": "All graph data cleared successfully",
+            "nodes_count": len(graph_data.nodes),
+            "edges_count": len(graph_data.edges)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error clearing data: {str(e)}")
+
+@app.get("/show")
+async def show_whole_graph():
+    """Display the whole graph using premium Cytoscape.js visualization with uniform nodes and edge details"""
+    try:
+        if len(graph_data.nodes) == 0:
+            raise HTTPException(status_code=400, detail="No graph data loaded. Please initialize first.")
+        
+        # Premium color scheme for entity types
+        node_colors = {
+            'organization': '#e74c3c',    # Red - Companies, partners, vendors
+            'person': '#3498db',          # Blue - Employees, executives, contractors
+            'team': '#2ecc71',            # Green - Departments, squads, groups
+            'project': '#f39c12',         # Orange - Internal initiatives, OKRs
+            'document': '#9b59b6',        # Purple - Files, reports, wikis, notes
+            'product': '#1abc9c',         # Turquoise - Products, services, features
+            'event': '#e67e22',           # Dark Orange - Meetings, launches, training
+            'task': '#34495e',            # Dark Blue-Gray - Tickets, issues, action items
+            'location': '#95a5a6',        # Gray - Office, HQ, remote site
+            'technology': '#f1c40f',      # Yellow - Tools, tech stack, SaaS apps
+            'customer': '#8e44ad',        # Dark Purple - Client, account, partner org
+            'default': '#7f8c8d'          # Default Gray
+        }
+        
+        # Prepare data for Cytoscape.js
+        elements = []
+        
+        # Add nodes with uniform size
+        uniform_node_size = 60  # Fixed size for all nodes
+        for node_id, node in graph_data.nodes.items():
+            entity_type = node.entity_type.lower() if node.entity_type else 'default'
+            description = node.description or 'No description available'
+            
+            # Calculate degree for display purposes
+            degree = len([e for e in graph_data.edges if e.source == node_id or e.target == node_id])
+            
+            elements.append({
+                'data': {
+                    'id': node_id,
+                    'label': node_id,
+                    'entity_type': entity_type,
+                    'description': description,
+                    'degree': degree,
+                    'size': uniform_node_size,
+                    'color': node_colors.get(entity_type, node_colors['default'])
+                }
+            })
+        
+        # Add edges with detailed information
+        for edge in graph_data.edges:
+            elements.append({
+                'data': {
+                    'id': f"{edge.source}-{edge.target}",
+                    'source': edge.source,
+                    'target': edge.target,
+                    'label': edge.keywords or '',
+                    'description': edge.description or 'No description available',
+                    'keywords': edge.keywords or 'No keywords',
+                    'weight': edge.weight,
+                    'edge_type': 'relationship'
+                }
+            })
+        
+        # Create premium HTML content
+        html_content = f"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LightRAG Knowledge Graph - Premium View</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.26.0/cytoscape.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }}
+        
+        body {{
+            font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            height: 100vh;
+            overflow: hidden;
+        }}
+        
+        .container {{
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }}
+        
+        .header {{
+            background: rgba(255, 255, 255, 0.98);
+            padding: 20px 30px;
+            backdrop-filter: blur(20px);
+            box-shadow: 0 4px 30px rgba(0,0,0,0.1);
+            z-index: 1000;
+            border-bottom: 1px solid rgba(255,255,255,0.3);
+        }}
+        
+        .title {{
+            font-size: 28px;
+            font-weight: 700;
+            color: #2c3e50;
+            margin-bottom: 15px;
+            text-align: center;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }}
+        
+        .controls {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            align-items: center;
+            justify-content: center;
+        }}
+        
+        .control-group {{
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }}
+        
+        .search-box {{
+            padding: 12px 20px;
+            border: 2px solid #e1e8ed;
+            border-radius: 30px;
+            font-size: 14px;
+            width: 280px;
+            background: white;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }}
+        
+        .search-box:focus {{
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+            transform: translateY(-1px);
+        }}
+        
+        .btn {{
+            padding: 12px 24px;
+            border: none;
+            border-radius: 25px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }}
+        
+        .btn-primary {{
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+        }}
+        
+        .btn-primary:hover {{
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3);
+        }}
+        
+        .btn-secondary {{
+            background: linear-gradient(45deg, #f8f9fa, #e9ecef);
+            color: #495057;
+        }}
+        
+        .btn-secondary:hover {{
+            background: linear-gradient(45deg, #e9ecef, #dee2e6);
+            transform: translateY(-1px);
+        }}
+        
+        .stats {{
+            background: linear-gradient(45deg, #e74c3c, #c0392b);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 25px;
+            font-weight: 600;
+            font-size: 14px;
+            box-shadow: 0 4px 15px rgba(231, 76, 60, 0.3);
+        }}
+        
+        .legend {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            max-width: 800px;
+        }}
+        
+        .legend-item {{
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 13px;
+            font-weight: 500;
+            padding: 8px 12px;
+            background: rgba(255,255,255,0.7);
+            border-radius: 15px;
+            transition: all 0.3s ease;
+        }}
+        
+        .legend-item:hover {{
+            background: rgba(255,255,255,0.9);
+            transform: translateY(-1px);
+        }}
+        
+        .legend-color {{
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }}
+        
+        .graph-container {{
+            flex: 1;
+            position: relative;
+            background: white;
+            margin: 15px;
+            border-radius: 20px;
+            box-shadow: 0 15px 50px rgba(0,0,0,0.2);
+            overflow: hidden;
+        }}
+        
+        #cy {{
+            width: 100%;
+            height: 100%;
+        }}
+        
+        .info-panel {{
+            position: absolute;
+            top: 25px;
+            right: 25px;
+            background: rgba(255, 255, 255, 0.98);
+            padding: 25px;
+            border-radius: 20px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.15);
+            max-width: 400px;
+            max-height: 500px;
+            overflow-y: auto;
+            backdrop-filter: blur(20px);
+            display: none;
+            z-index: 1000;
+            border: 1px solid rgba(255,255,255,0.3);
+        }}
+        
+        .info-panel h3 {{
+            color: #2c3e50;
+            margin-bottom: 15px;
+            font-size: 20px;
+            font-weight: 700;
+        }}
+        
+        .info-panel p {{
+            color: #7f8c8d;
+            line-height: 1.6;
+            margin-bottom: 10px;
+        }}
+        
+        .info-panel .close-btn {{
+            position: absolute;
+            top: 15px;
+            right: 20px;
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #95a5a6;
+            transition: all 0.3s ease;
+        }}
+        
+        .info-panel .close-btn:hover {{
+            color: #e74c3c;
+            transform: scale(1.1);
+        }}
+        
+        .layout-selector {{
+            background: white;
+            border: 2px solid #e1e8ed;
+            border-radius: 25px;
+            padding: 10px 16px;
+            font-size: 14px;
+            font-weight: 500;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }}
+        
+        .floating-help {{
+            position: absolute;
+            bottom: 25px;
+            left: 25px;
+            background: rgba(44, 62, 80, 0.95);
+            color: white;
+            padding: 20px;
+            border-radius: 15px;
+            font-size: 13px;
+            max-width: 320px;
+            backdrop-filter: blur(20px);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }}
+        
+        .floating-help h4 {{
+            margin-bottom: 12px;
+            color: #3498db;
+            font-size: 16px;
+            font-weight: 600;
+        }}
+        
+        .floating-help ul {{
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }}
+        
+        .floating-help li {{
+            margin-bottom: 6px;
+            padding-left: 20px;
+            position: relative;
+            line-height: 1.4;
+        }}
+        
+        .floating-help li:before {{
+            content: "✨";
+            position: absolute;
+            left: 0;
+        }}
+        
+        .entity-badge {{
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="title">
+                <i class="fas fa-project-diagram"></i> LightRAG Knowledge Graph
+            </div>
+            <div class="controls">
+                <div class="control-group">
+                    <input type="text" class="search-box" id="searchBox" placeholder="🔍 Search nodes or edges..." />
+                </div>
+                
+                <div class="control-group">
+                    <select class="layout-selector" id="layoutSelector">
+                        <option value="cose">🎯 Physics Layout (CoSE)</option>
+                        <option value="fcose">⚡ Fast CoSE</option>
+                        <option value="circle">⭕ Circle Layout</option>
+                        <option value="grid">📊 Grid Layout</option>
+                        <option value="concentric">🎪 Concentric Layout</option>
+                        <option value="breadthfirst">🌳 Breadth First</option>
+                    </select>
+                </div>
+                
+                <button class="btn btn-primary" id="fitBtn">
+                    <i class="fas fa-expand-arrows-alt"></i> Fit View
+                </button>
+                <button class="btn btn-secondary" id="resetBtn">
+                    <i class="fas fa-redo"></i> Reset
+                </button>
+                <button class="btn btn-secondary" id="exportBtn">
+                    <i class="fas fa-download"></i> Export PNG
+                </button>
+                
+                <div class="stats">
+                    <i class="fas fa-chart-bar"></i> {len(graph_data.nodes)} Nodes | {len(graph_data.edges)} Edges
+                </div>
+            </div>
+            
+            <div class="legend">
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: {node_colors['organization']}"></div>
+                    <span><i class="fas fa-building"></i> Organizations</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: {node_colors['person']}"></div>
+                    <span><i class="fas fa-user"></i> People</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: {node_colors['team']}"></div>
+                    <span><i class="fas fa-users"></i> Teams</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: {node_colors['project']}"></div>
+                    <span><i class="fas fa-project-diagram"></i> Projects</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: {node_colors['document']}"></div>
+                    <span><i class="fas fa-file-alt"></i> Documents</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: {node_colors['product']}"></div>
+                    <span><i class="fas fa-box"></i> Products</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: {node_colors['event']}"></div>
+                    <span><i class="fas fa-calendar"></i> Events</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: {node_colors['task']}"></div>
+                    <span><i class="fas fa-tasks"></i> Tasks</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: {node_colors['location']}"></div>
+                    <span><i class="fas fa-map-marker-alt"></i> Locations</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: {node_colors['technology']}"></div>
+                    <span><i class="fas fa-cogs"></i> Technology</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background-color: {node_colors['customer']}"></div>
+                    <span><i class="fas fa-handshake"></i> Customers</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="graph-container">
+            <div id="cy"></div>
+            
+            <div class="info-panel" id="infoPanel">
+                <button class="close-btn" id="closeInfo">&times;</button>
+                <div id="infoContent"></div>
+            </div>
+            
+            <div class="floating-help">
+                <h4><i class="fas fa-lightbulb"></i> Navigation Guide</h4>
+                <ul>
+                    <li>Click nodes for details</li>
+                    <li>Click edges for relationship info</li>
+                    <li>Drag to pan around</li>
+                    <li>Mouse wheel to zoom</li>
+                    <li>Right-click to highlight neighbors</li>
+                    <li>Double-click background to deselect</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Graph data
+        const elements = {json.dumps(elements, indent=2)};
+        
+        // Initialize Cytoscape with premium settings
+        const cy = cytoscape({{
+            container: document.getElementById('cy'),
+            
+            elements: elements,
+            
+            style: [
+                {{
+                    selector: 'node',
+                    style: {{
+                        'background-color': 'data(color)',
+                        'label': 'data(label)',
+                        'width': 'data(size)',
+                        'height': 'data(size)',
+                        'font-size': '12px',
+                        'font-weight': 'bold',
+                        'text-valign': 'center',
+                        'text-halign': 'center',
+                        'color': '#2c3e50',
+                        'text-outline-width': 2,
+                        'text-outline-color': '#ffffff',
+                        'border-width': 3,
+                        'border-color': '#ffffff',
+                        'transition-property': 'background-color, border-color, width, height, border-width',
+                        'transition-duration': '0.3s',
+                        'box-shadow': '0 4px 15px rgba(0,0,0,0.2)'
+                    }}
+                }},
+                {{
+                    selector: 'node:selected',
+                    style: {{
+                        'border-color': '#e74c3c',
+                        'border-width': 5,
+                        'box-shadow': '0 8px 25px rgba(231, 76, 60, 0.4)'
+                    }}
+                }},
+                {{
+                    selector: 'edge',
+                    style: {{
+                        'width': 3,
+                        'line-color': '#95a5a6',
+                        'target-arrow-color': '#95a5a6',
+                        'target-arrow-shape': 'triangle',
+                        'curve-style': 'bezier',
+                        'opacity': 0.8,
+                        'transition-property': 'line-color, width, opacity, target-arrow-color',
+                        'transition-duration': '0.3s',
+                        'arrow-scale': 1.2
+                    }}
+                }},
+                {{
+                    selector: 'edge:selected',
+                    style: {{
+                        'line-color': '#e74c3c',
+                        'target-arrow-color': '#e74c3c',
+                        'width': 5,
+                        'opacity': 1
+                    }}
+                }},
+                {{
+                    selector: '.highlighted',
+                    style: {{
+                        'background-color': '#f39c12',
+                        'line-color': '#f39c12',
+                        'target-arrow-color': '#f39c12',
+                        'border-color': '#f39c12',
+                        'transition-property': 'background-color, line-color, target-arrow-color, border-color',
+                        'transition-duration': '0.5s'
+                    }}
+                }},
+                {{
+                    selector: '.faded',
+                    style: {{
+                        'opacity': 0.3,
+                        'text-opacity': 0.3
+                    }}
+                }}
+            ],
+            
+            layout: {{
+                name: 'cose',
+                animate: true,
+                animationDuration: 1500,
+                fit: true,
+                padding: 60,
+                nodeRepulsion: function( node ){{ return 4096; }},
+                nodeOverlap: 8,
+                idealEdgeLength: function( edge ){{ return 64; }},
+                edgeElasticity: function( edge ){{ return 64; }},
+                nestingFactor: 1.2,
+                gravity: 1,
+                numIter: 1500,
+                initialTemp: 1000,
+                coolingFactor: 0.99,
+                minTemp: 1.0
+            }},
+            
+            wheelSensitivity: 0.3,
+            minZoom: 0.1,
+            maxZoom: 8
+        }});
+        
+        // Event handlers
+        const infoPanel = document.getElementById('infoPanel');
+        const infoContent = document.getElementById('infoContent');
+        const searchBox = document.getElementById('searchBox');
+        const layoutSelector = document.getElementById('layoutSelector');
+        
+        // Node click handler
+        cy.on('tap', 'node', function(evt) {{
+            const node = evt.target;
+            const data = node.data();
+            
+            const entityColor = data.color;
+            const entityType = data.entity_type;
+            
+            infoContent.innerHTML = `
+                <h3><i class="fas fa-circle" style="color: ${{entityColor}}"></i> ${{data.label}}</h3>
+                <p><span class="entity-badge" style="background-color: ${{entityColor}}; color: white;">${{entityType}}</span></p>
+                <p><strong><i class="fas fa-link"></i> Connections:</strong> ${{data.degree}}</p>
+                <p><strong><i class="fas fa-info-circle"></i> Description:</strong></p>
+                <p style="font-style: italic; max-height: 250px; overflow-y: auto; padding: 10px; background: #f8f9fa; border-radius: 8px;">${{data.description}}</p>
+            `;
+            
+            infoPanel.style.display = 'block';
+        }});
+        
+        // Edge click handler - NEW FEATURE
+        cy.on('tap', 'edge', function(evt) {{
+            const edge = evt.target;
+            const data = edge.data();
+            
+            infoContent.innerHTML = `
+                <h3><i class="fas fa-arrows-alt-h"></i> Relationship Details</h3>
+                <p><strong><i class="fas fa-play"></i> From:</strong> ${{data.source}}</p>
+                <p><strong><i class="fas fa-stop"></i> To:</strong> ${{data.target}}</p>
+                <p><strong><i class="fas fa-tags"></i> Keywords:</strong> ${{data.keywords}}</p>
+                <p><strong><i class="fas fa-weight-hanging"></i> Weight:</strong> ${{data.weight}}</p>
+                <p><strong><i class="fas fa-info-circle"></i> Description:</strong></p>
+                <p style="font-style: italic; max-height: 250px; overflow-y: auto; padding: 10px; background: #f8f9fa; border-radius: 8px;">${{data.description}}</p>
+            `;
+            
+            infoPanel.style.display = 'block';
+        }});
+        
+        // Background click handler
+        cy.on('tap', function(evt) {{
+            if (evt.target === cy) {{
+                infoPanel.style.display = 'none';
+                cy.elements().removeClass('highlighted faded');
+            }}
+        }});
+        
+        // Right-click to highlight neighbors
+        cy.on('cxttap', 'node', function(evt) {{
+            const node = evt.target;
+            const neighbors = node.neighborhood().add(node);
+            
+            cy.elements().addClass('faded');
+            neighbors.removeClass('faded').addClass('highlighted');
+        }});
+        
+        // Close info panel
+        document.getElementById('closeInfo').onclick = function() {{
+            infoPanel.style.display = 'none';
+        }};
+        
+        // Enhanced search functionality
+        let searchTimeout;
+        searchBox.addEventListener('input', function() {{
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {{
+                const searchTerm = this.value.toLowerCase();
+                
+                if (searchTerm === '') {{
+                    cy.elements().removeClass('highlighted faded');
+                    return;
+                }}
+                
+                const matchingNodes = cy.nodes().filter(function(node) {{
+                    const data = node.data();
+                    return data.label.toLowerCase().includes(searchTerm) ||
+                           data.description.toLowerCase().includes(searchTerm) ||
+                           data.entity_type.toLowerCase().includes(searchTerm);
+                }});
+                
+                const matchingEdges = cy.edges().filter(function(edge) {{
+                    const data = edge.data();
+                    return data.keywords.toLowerCase().includes(searchTerm) ||
+                           data.description.toLowerCase().includes(searchTerm);
+                }});
+                
+                const allMatches = matchingNodes.union(matchingEdges);
+                
+                if (allMatches.length > 0) {{
+                    cy.elements().addClass('faded');
+                    allMatches.removeClass('faded').addClass('highlighted');
+                    
+                    // Fit to matching elements
+                    cy.fit(allMatches, 100);
+                }}
+            }}, 300);
+        }});
+        
+        // Enhanced layout selector
+        layoutSelector.addEventListener('change', function() {{
+            const layoutName = this.value;
+            const layoutOptions = {{
+                cose: {{
+                    name: 'cose',
+                    animate: true,
+                    animationDuration: 1500,
+                    fit: true,
+                    padding: 60,
+                    nodeRepulsion: function( node ){{ return 4096; }},
+                    nodeOverlap: 8,
+                    idealEdgeLength: function( edge ){{ return 64; }},
+                    edgeElasticity: function( edge ){{ return 64; }},
+                    nestingFactor: 1.2,
+                    gravity: 1,
+                    numIter: 1500
+                }},
+                fcose: {{
+                    name: 'fcose',
+                    animate: true,
+                    fit: true,
+                    padding: 60,
+                    nodeDimensionsIncludeLabels: true,
+                    uniformNodeDimensions: false,
+                    packComponents: true,
+                    stepSize: 40,
+                    samplingType: true,
+                    sampleSize: 25,
+                    nodeSeparation: 75,
+                    piTol: 0.0000001,
+                    nodeRepulsion: 4500,
+                    idealEdgeLength: 50,
+                    edgeElasticity: 0.45,
+                    nestingFactor: 0.1,
+                    gravity: 0.25,
+                    numIter: 2500
+                }},
+                circle: {{
+                    name: 'circle',
+                    animate: true,
+                    fit: true,
+                    padding: 60,
+                    avoidOverlap: true,
+                    radius: 200
+                }},
+                grid: {{
+                    name: 'grid',
+                    animate: true,
+                    fit: true,
+                    padding: 60,
+                    avoidOverlap: true,
+                    rows: Math.ceil(Math.sqrt(cy.nodes().length))
+                }},
+                concentric: {{
+                    name: 'concentric',
+                    animate: true,
+                    fit: true,
+                    padding: 60,
+                    avoidOverlap: true,
+                    concentric: function( node ){{
+                        return node.degree();
+                    }},
+                    levelWidth: function( nodes ){{
+                        return 3;
+                    }},
+                    minNodeSpacing: 50
+                }},
+                breadthfirst: {{
+                    name: 'breadthfirst',
+                    animate: true,
+                    fit: true,
+                    padding: 60,
+                    directed: false,
+                    roots: cy.nodes().first(),
+                    spacingFactor: 2,
+                    avoidOverlap: true
+                }}
+            }};
+            
+            cy.layout(layoutOptions[layoutName]).run();
+        }});
+        
+        // Control buttons
+        document.getElementById('fitBtn').onclick = function() {{
+            cy.fit(undefined, 60);
+        }};
+        
+        document.getElementById('resetBtn').onclick = function() {{
+            cy.elements().removeClass('highlighted faded');
+            searchBox.value = '';
+            infoPanel.style.display = 'none';
+            cy.fit(undefined, 60);
+        }};
+        
+        document.getElementById('exportBtn').onclick = function() {{
+            const png = cy.png({{
+                output: 'blob',
+                bg: 'white',
+                full: true,
+                scale: 3
+            }});
+            
+            const link = document.createElement('a');
+            link.download = 'lightrag_knowledge_graph.png';
+            link.href = URL.createObjectURL(png);
+            link.click();
+        }};
+        
+        // Initial fit
+        cy.ready(function() {{
+            cy.fit(undefined, 60);
+        }});
+        
+        // Responsive handling
+        window.addEventListener('resize', function() {{
+            cy.resize();
+            cy.fit(undefined, 60);
+        }});
+    </script>
+</body>
+</html>
+        """
+        
+        from fastapi.responses import HTMLResponse
+        return HTMLResponse(content=html_content)
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error generating graph visualization: {{str(e)}}")
 
 @app.get("/")
 async def serve_frontend():

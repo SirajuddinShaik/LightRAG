@@ -15,6 +15,15 @@ from lightrag import LightRAG, QueryParam
 from sentence_transformers import SentenceTransformer
 from lightrag.kg.shared_storage import initialize_pipeline_status
 from vespa_integration import VespaDocument, load_vespa_documents_from_json
+import openai
+
+from dotenv import load_dotenv
+load_dotenv()
+import nest_asyncio
+client = openai.OpenAI(
+	api_key=os.getenv("OPENAI_API_KEY"),
+	base_url="https://veronica.pratikn.com"
+)
 
 import nest_asyncio
 
@@ -28,9 +37,8 @@ WORKING_DIR = "./data/vespa_emails_rag1"
 VESPA_JSON_FILE = "vespa_complete_export_20250902_164758.json"
 
 # Clean and recreate working directory
-if os.path.exists(WORKING_DIR):
-    import shutil
-    shutil.rmtree(WORKING_DIR)
+if not os.path.exists(WORKING_DIR):
+    os.makedirs(WORKING_DIR, exist_ok=True)
 
 os.makedirs(WORKING_DIR, exist_ok=True)
 
@@ -112,7 +120,17 @@ async def llm_model_func(
         combined_prompt += f"user: {prompt}"
 
         # Call the Gemini provider
-        response = await provider.generate_content(combined_prompt)
+        # response = await provider.generate_content(combined_prompt)
+        response = client.chat.completions.create(
+                model="gemini-2.5-flash",
+                messages=history_messages + [
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ]
+            )
+        response = response.choices[0].message.content
         
         if response:
             return response
@@ -225,6 +243,38 @@ class VespaDataProcessor:
     def __init__(self, vespa_documents):
         self.documents = vespa_documents
         print(f"Initialized processor with {len(self.documents)} Vespa documents")
+    
+    def _should_filter_email(self, email_data: dict) -> bool:
+        """Enhanced filtering for hierarchical processing"""
+        from_address = email_data.get('from', '').lower()
+        subject = email_data.get('subject', '').lower()
+        content = email_data.get('content', '').lower()
+        
+        # Filter out automated emails
+        automated_patterns = [
+            'github.com', 'noreply', 'no-reply', 'notification', 'notifications',
+            'donotreply', 'alerts', 'support@', 'admin@', 'system@',
+            'automated', 'daily digest', 'weekly report'
+        ]
+        
+        # Filter by sender
+        for pattern in automated_patterns:
+            if pattern in from_address:
+                print(f"🚫 Filtering automated email from: {from_address}")
+                return True
+        
+        # Filter by subject
+        for pattern in automated_patterns:
+            if pattern in subject:
+                print(f"🚫 Filtering automated subject: {subject}")
+                return True
+        
+        # Filter very short content (likely automated)
+        if len(content) < 50:
+            print(f"🚫 Filtering short content email: {len(content)} chars")
+            return True
+        
+        return False
     
     def format_document_for_rag(self, doc: VespaDocument) -> str:
         """Format a VespaDocument for LightRAG processing"""
@@ -360,15 +410,32 @@ async def process_vespa_documents(rag, processor: VespaDataProcessor):
         
         print(f"\n📄 Processing batch {i//batch_size + 1}: documents {i+1} to {batch_end}")
         
-        # Format documents for this batch
+        # Format documents for this batch with filtering
         formatted_texts = []
+        filtered_count = 0
+        
         for doc in batch_docs:
             try:
+                # Create email data structure for filtering
+                email_data = {
+                    'from': doc.metadata.get('from', '') if doc.metadata else doc.source or '',
+                    'subject': doc.title or '',
+                    'content': doc.content or ''
+                }
+                
+                # Apply email filtering
+                if processor._should_filter_email(email_data):
+                    filtered_count += 1
+                    continue
+                
                 formatted_text = processor.format_document_for_rag(doc)
                 formatted_texts.append(formatted_text)
             except Exception as e:
                 print(f"   ⚠️ Error formatting document {doc.id}: {e}")
                 continue
+        
+        if filtered_count > 0:
+            print(f"   🚫 Filtered out {filtered_count} automated emails from batch")
         
         if not formatted_texts:
             print(f"   ⚠️ No valid documents in batch {i//batch_size + 1}")

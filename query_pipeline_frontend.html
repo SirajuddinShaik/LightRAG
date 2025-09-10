@@ -540,6 +540,9 @@
                     <input type="text" id="folderPath" value="/Users/shaik.s/Desktop/LightRAG/" placeholder="Enter folder path">
                 </div>
                 <button onclick="initializeSystem()">Initialize Graph Data</button>
+                <button onclick="showCompleteGraph()" id="showGraphBtn" disabled style="background: linear-gradient(45deg, #9b59b6, #8e44ad); margin-top: 8px;">
+                    🌐 Show Complete Graph
+                </button>
                 <div id="initStatus" class="status-indicator status-ready">Ready to Initialize</div>
             </div>
 
@@ -2221,12 +2224,92 @@
             }
         }
 
+        // Show complete graph in new window
+        function showCompleteGraph() {
+            try {
+                console.log('Opening complete graph visualization...');
+                
+                // Open the /show endpoint in a new window/tab
+                const graphWindow = window.open(
+                    'http://localhost:8000/show',
+                    'lightrag_complete_graph',
+                    'width=1400,height=900,scrollbars=yes,resizable=yes,toolbar=no,menubar=no,location=no,status=no'
+                );
+                
+                if (graphWindow) {
+                    graphWindow.focus();
+                    console.log('✅ Complete graph window opened successfully');
+                } else {
+                    // Fallback if popup was blocked
+                    console.warn('Popup blocked, opening in same tab');
+                    window.location.href = 'http://localhost:8000/show';
+                }
+            } catch (error) {
+                console.error('Error opening complete graph:', error);
+                alert(`Error opening graph visualization: ${error.message}`);
+            }
+        }
+
+        // Check system status and auto-initialize if data exists
+        async function checkSystemStatus() {
+            try {
+                console.log('Checking system status...');
+                const response = await apiCall('/status');
+                console.log('System status:', response);
+                
+                const statusDiv = document.getElementById('initStatus');
+                const queryBtn = document.getElementById('queryBtn');
+                const showGraphBtn = document.getElementById('showGraphBtn');
+                const folderPathInput = document.getElementById('folderPath');
+                
+                // Update folder path field with persisted path from server
+                if (response.last_folder_path && folderPathInput) {
+                    folderPathInput.value = response.last_folder_path;
+                    console.log('📁 Updated folder path from server:', response.last_folder_path);
+                }
+                
+                if (response.has_data) {
+                    // Data already loaded - enable query processing immediately
+                    statusDiv.className = 'status-indicator status-ready';
+                    statusDiv.textContent = `✅ Auto-loaded: ${response.nodes_count} nodes, ${response.edges_count} edges`;
+                    
+                    if (queryBtn) queryBtn.disabled = false;
+                    if (showGraphBtn) showGraphBtn.disabled = false; // Enable show graph button
+                    
+                    // Hide initial graph message
+                    const graphMessage = document.getElementById('graphMessage');
+                    if (graphMessage) graphMessage.style.display = 'none';
+                    
+                    console.log('✅ System ready - data already loaded');
+                    return true;
+                } else {
+                    // No data loaded - require manual initialization
+                    statusDiv.className = 'status-indicator status-ready';
+                    statusDiv.textContent = 'Ready to Initialize';
+                    
+                    if (queryBtn) queryBtn.disabled = true;
+                    if (showGraphBtn) showGraphBtn.disabled = true; // Disable show graph button
+                    
+                    console.log('🔄 System requires initialization');
+                    return false;
+                }
+            } catch (error) {
+                console.error('Failed to check system status:', error);
+                const statusDiv = document.getElementById('initStatus');
+                if (statusDiv) {
+                    statusDiv.className = 'status-indicator status-error';
+                    statusDiv.textContent = `❌ Status check failed: ${error.message}`;
+                }
+                return false;
+            }
+        }
+
         // Initialize on page load
         window.onload = function() {
             console.log('Initializing page...');
             
             // Wait for DOM to be fully ready
-            setTimeout(() => {
+            setTimeout(async () => {
                 try {
                     // Verify all critical elements exist
                     const criticalElements = [
@@ -2255,7 +2338,13 @@
                     updatePhysicsDisplay();
                     toggleHoppingMode(); // Set initial hopping mode display
                     
-                    // Query button already enabled in initializeSystem
+                    // Check if data is already loaded
+                    const hasData = await checkSystemStatus();
+                    if (hasData) {
+                        console.log('🎉 Data detected - system ready for queries without initialization');
+                    } else {
+                        console.log('⚠️ No data detected - manual initialization required');
+                    }
                     
                     // Initialize rewriter availability check
                     checkRewriterAvailability();

@@ -693,66 +693,81 @@ Subcategories:
         """Parse the LLM response for hierarchical grouping."""
         
         try:
-            from .utils import split_string_by_multi_markers
             import re
-            
-            # Split response into records
-            records = split_string_by_multi_markers(
-                response,
-                [context["record_delimiter"], context["completion_delimiter"]]
-            )
             
             new_nodes = []
             new_edges = []
             entity_renames = []
             
+            # Updated parsing logic to handle the actual LLM response format
+            # Split by ## to get individual records
+            records = response.split('##')
+            
             for record in records:
                 record = record.strip()
-                if not record:
+                if not record or record == '#####':
                     continue
                     
-                # Extract content within parentheses
+                # Extract content within parentheses - improved regex
                 match = re.search(r'\((.*?)\)', record)
                 if not match:
                     continue
                     
                 content = match.group(1)
-                parts = content.split(context["tuple_delimiter"])
+                # Split by | which is the actual tuple delimiter in the response
+                parts = [part.strip().strip('"') for part in content.split('|')]
                 
                 if len(parts) < 2:
                     continue
                 
-                action = parts[0].strip().strip('"')
+                action = parts[0].strip()
+                logger.debug(f"Parsing action: {action} with {len(parts)} parts: {parts}")
                 
                 if action == "new_node" and len(parts) >= 5:
+                    try:
+                        confidence = float(parts[4]) if parts[4].replace('.', '').replace('-', '').isdigit() else 0.8
+                    except (ValueError, IndexError):
+                        confidence = 0.8
+                        
                     new_nodes.append({
-                        "name": parts[1].strip().strip('"'),
-                        "type": parts[2].strip().strip('"'),
-                        "description": parts[3].strip().strip('"'),
-                        "confidence": float(parts[4].strip().strip('"')) if parts[4].strip().strip('"').replace('.', '').isdigit() else 0.8
+                        "name": parts[1],
+                        "type": parts[2],
+                        "description": parts[3],
+                        "confidence": confidence
                     })
+                    logger.debug(f"Added new node: {parts[1]}")
                     
                 elif action == "new_edge" and len(parts) >= 6:
+                    try:
+                        weight = float(parts[5]) if parts[5].replace('.', '').replace('-', '').isdigit() else 8.0
+                    except (ValueError, IndexError):
+                        weight = 8.0
+                        
                     new_edges.append({
-                        "source": parts[1].strip().strip('"'),
-                        "target": parts[2].strip().strip('"'),
-                        "description": parts[3].strip().strip('"'),
-                        "keywords": parts[4].strip().strip('"'),
-                        "weight": float(parts[5].strip().strip('"')) if parts[5].strip().strip('"').replace('.', '').isdigit() else 8.0
+                        "source": parts[1],
+                        "target": parts[2],
+                        "description": parts[3],
+                        "keywords": parts[4],
+                        "weight": weight
                     })
+                    logger.debug(f"Added new edge: {parts[1]} -> {parts[2]}")
                     
                 elif action == "rename_entity" and len(parts) >= 4:
                     entity_renames.append({
-                        "old_name": parts[1].strip().strip('"'),
-                        "new_name": parts[2].strip().strip('"'),
-                        "reason": parts[3].strip().strip('"')
+                        "old_name": parts[1],
+                        "new_name": parts[2],
+                        "reason": parts[3]
                     })
+                    logger.debug(f"Added entity rename: {parts[1]} -> {parts[2]}")
             
-            return {
+            result = {
                 "new_nodes": new_nodes,
                 "new_edges": new_edges,
                 "entity_renames": entity_renames
             }
+            
+            logger.info(f"Parsed hierarchical response: {len(new_nodes)} nodes, {len(new_edges)} edges, {len(entity_renames)} renames")
+            return result
             
         except Exception as e:
             logger.error(f"Error parsing hierarchical response: {e}")
@@ -1660,7 +1675,7 @@ Subcategories:
             logger.debug(f"Recursive selection: D1 source alt({direction1_source_alternative}:{direction1_score:.3f}) vs D2 target alt({direction2_target_alternative}:{direction2_score:.3f})")
             
             # Minimum improvement threshold to justify routing change
-            improvement_threshold = 0.15
+            improvement_threshold = 0.1
             
             # Check if either direction found a significantly better match
             if direction1_score > direction2_score + improvement_threshold:
