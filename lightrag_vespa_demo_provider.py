@@ -33,7 +33,7 @@ nest_asyncio.apply()
 load_dotenv()
 gemini_api_key = os.getenv("GEMINI_API_KEY")
 
-WORKING_DIR = "./data/vespa_emails_rag1"
+WORKING_DIR = "./data/vespa_emails_rag2"
 VESPA_JSON_FILE = "vespa_complete_export_20250902_164758.json"
 
 # Clean and recreate working directory
@@ -404,7 +404,7 @@ async def process_vespa_documents(rag, processor: VespaDataProcessor):
     batch_size = 10  # Conservative batch size
     successful_inserts = 0
     
-    for i in range(0, len(documents), batch_size):
+    for i in range(0, 20, batch_size):
         batch_docs = documents[i:i + batch_size]
         batch_end = min(i + batch_size, len(documents))
         

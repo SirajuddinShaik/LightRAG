@@ -22,33 +22,67 @@ PROMPTS["DEFAULT_ENTITY_TYPES"] = [
     "location",          # Office, HQ, remote site
     "technology",        # Tools, tech stack, SaaS apps
     "customer",          # Client, account, partner org
+    "KnowledgeBase",     # A collection of information, like a wiki or database
+]
+
+workspace_entity_types = [
+    # People & Organization
+    "Person",       # properties: name, email, role
+    "Team",
+    "Project",      # General projects
+    "KeyProject",   # High-impact or critical projects
+    "Organization",
+
+    # Communication
+    "MailThread",   # each thread as a single node
+    "Attachment",   # files attached to emails or PRs
+
+    # Code & Development
+    "Repository",
+    "Branch",
+    "Commit",
+    "CodeChangeRequest",  # combined PullRequest / MergeRequest/ CodeReview
+    "Issue",              # Jira/GitHub issue or ticket
+
+    # Optional / Contextual
+    "Event",        # meetings, deadlines, workflow triggers
+    "Topic",     # semantic clusters from emails (optional)
+    "Task",       # action items extracted from emails (optional)
+    "KnowledgeBase" # A collection of information, like a wiki or database
 ]
 
 
 PROMPTS["DEFAULT_USER_PROMPT"] = "n/a"
 
 PROMPTS["entity_extraction"] = """---Goal---
-Given a text document that is potentially relevant to this activity and a list of entity types, identify all entities of those types from the text and all relationships among the identified entities.
+Your goal is to construct a **workspace-level knowledge graph** from the provided text. This graph should capture the most important entities and their relationships to provide a clear overview of the workspace. Focus on quality over quantity.
 Use {language} as output language.
 
+---Noise Reduction Instructions---
+- **Primary Focus**: Extract only the most critical entities and relationships that are central to the main topic of the text.
+- **Avoid Trivial Information**: Do not extract entities or relationships that are mentioned in passing, are examples, or do not contribute to the core understanding of the workspace.
+- **Distinguish Key Projects**: Use the `KeyProject` type for projects that are critical or have high impact, and `Project` for all others.
+- **Concise Descriptions**: Keep descriptions brief and focused on the entity's role within the workspace.
+
 ---Steps---
-1. Identify all entities. For each identified entity, extract the following information:
-- entity_name: Name of the entity, use same language as input text. If English, capitalized the name
-- entity_type: One of the following types: [{entity_types}]
-- entity_description: Provide a comprehensive description of the entity's attributes and activities *based solely on the information present in the input text*. **Do not infer or hallucinate information not explicitly stated.** If the text provides insufficient information to create a comprehensive description, state "Description not available in text."
-Format each entity as ("entity"{tuple_delimiter}<entity_name>{tuple_delimiter}<entity_type>{tuple_delimiter}<entity_description>)
+1.  **Identify Entities**: From the text, identify all relevant entities. For each entity, extract:
+    *   `entity_name`: The name of the entity.
+    *   `entity_type`: One of the following: [{entity_types}].
+    *   `entity_description`: A brief description of the entity's role and attributes based *only* on the text.
 
-2. From the entities identified in step 1, identify all pairs of (source_entity, target_entity) that are *clearly related* to each other.
-For each pair of related entities, extract the following information:
-- source_entity: name of the source entity, as identified in step 1
-- target_entity: name of the target entity, as identified in step 1
-- relationship_description: explanation as to why you think the source entity and the target entity are related to each other
-- relationship_strength: a numeric score indicating strength of the relationship between the source entity and target entity
-- relationship_keywords: one or more high-level key words that summarize the overarching nature of the relationship, focusing on concepts or themes rather than specific details
+    Format: `("entity"{tuple_delimiter}<entity_name>{tuple_delimiter}<entity_type>{tuple_delimiter}<entity_description>)`
 
-**IMPORTANT: All relationships are DIRECTED and should have clear directionality from source to target. Consider the logical flow, causality, hierarchy, or influence when determining the direction. For example: "Company A" -> "Product B" (company produces product), "Manager C" -> "Team D" (manager leads team), "Event E" -> "Outcome F" (event causes outcome). This directional structure is essential for unidirectional graph traversal.**
+2.  **Identify Relationships**: Identify clear, directed relationships between the entities you found. For each relationship, extract:
+    *   `source_entity`: The starting entity of the relationship.
+    *   `target_entity`: The ending entity of the relationship.
+    *   `relationship_tag`: A concise, uppercase tag describing the relationship (e.g., `WORKS_AT`, `REPORTS_TO`, `MANAGES`, `USES`).
+    *   `relationship_description`: A brief explanation of why the entities are related.
+    *   `relationship_strength`: A score from 1-10 indicating the relationship's importance.
+    *   `relationship_keywords`: Keywords that summarize the relationship's theme.
 
-Format each relationship as ("relationship"{tuple_delimiter}<source_entity>{tuple_delimiter}<target_entity>{tuple_delimiter}<relationship_description>{tuple_delimiter}<relationship_keywords>{tuple_delimiter}<relationship_strength>)
+    **Directionality is crucial**. The relationship should flow logically from source to target (e.g., "Manager" -> "Team").
+
+    Format: `("relationship"{tuple_delimiter}<source_entity>{tuple_delimiter}<target_entity>{tuple_delimiter}<relationship_tag>{tuple_delimiter}<relationship_description>{tuple_delimiter}<relationship_keywords>{tuple_delimiter}<relationship_strength>)`
 
 3. Identify high-level key words that summarize the main concepts, themes, or topics of the entire text. These should capture the overarching ideas present in the document.
 Format the content-level key words as ("content_keywords"{tuple_delimiter}<high_level_keywords>)
@@ -92,11 +126,11 @@ Output:
 ("entity"{tuple_delimiter}"Jordan"{tuple_delimiter}"person"{tuple_delimiter}"Jordan shares a commitment to discovery and has a significant interaction with Taylor regarding a device."){record_delimiter}
 ("entity"{tuple_delimiter}"Cruz"{tuple_delimiter}"person"{tuple_delimiter}"Cruz is associated with a vision of control and order, influencing the dynamics among other characters."){record_delimiter}
 ("entity"{tuple_delimiter}"The Device"{tuple_delimiter}"technology"{tuple_delimiter}"The Device is central to the story, with potential game-changing implications, and is revered by Taylor."){record_delimiter}
-("relationship"{tuple_delimiter}"Alex"{tuple_delimiter}"Taylor"{tuple_delimiter}"Alex is affected by Taylor's authoritarian certainty and observes changes in Taylor's attitude towards the device."{tuple_delimiter}"power dynamics, perspective shift"{tuple_delimiter}7){record_delimiter}
-("relationship"{tuple_delimiter}"Alex"{tuple_delimiter}"Jordan"{tuple_delimiter}"Alex and Jordan share a commitment to discovery, which contrasts with Cruz's vision."{tuple_delimiter}"shared goals, rebellion"{tuple_delimiter}6){record_delimiter}
-("relationship"{tuple_delimiter}"Taylor"{tuple_delimiter}"Jordan"{tuple_delimiter}"Taylor and Jordan interact directly regarding the device, leading to a moment of mutual respect and an uneasy truce."{tuple_delimiter}"conflict resolution, mutual respect"{tuple_delimiter}8){record_delimiter}
-("relationship"{tuple_delimiter}"Jordan"{tuple_delimiter}"Cruz"{tuple_delimiter}"Jordan's commitment to discovery is in rebellion against Cruz's vision of control and order."{tuple_delimiter}"ideological conflict, rebellion"{tuple_delimiter}5){record_delimiter}
-("relationship"{tuple_delimiter}"Taylor"{tuple_delimiter}"The Device"{tuple_delimiter}"Taylor shows reverence towards the device, indicating its importance and potential impact."{tuple_delimiter}"reverence, technological significance"{tuple_delimiter}9){record_delimiter}
+("relationship"{tuple_delimiter}"Alex"{tuple_delimiter}"Taylor"{tuple_delimiter}"OBSERVES"{tuple_delimiter}"Alex is affected by Taylor's authoritarian certainty and observes changes in Taylor's attitude towards the device."{tuple_delimiter}"power dynamics, perspective shift"{tuple_delimiter}7){record_delimiter}
+("relationship"{tuple_delimiter}"Alex"{tuple_delimiter}"Jordan"{tuple_delimiter}"SHARES_GOAL_WITH"{tuple_delimiter}"Alex and Jordan share a commitment to discovery, which contrasts with Cruz's vision."{tuple_delimiter}"shared goals, rebellion"{tuple_delimiter}6){record_delimiter}
+("relationship"{tuple_delimiter}"Taylor"{tuple_delimiter}"Jordan"{tuple_delimiter}"INTERACTS_WITH"{tuple_delimiter}"Taylor and Jordan interact directly regarding the device, leading to a moment of mutual respect and an uneasy truce."{tuple_delimiter}"conflict resolution, mutual respect"{tuple_delimiter}8){record_delimiter}
+("relationship"{tuple_delimiter}"Jordan"{tuple_delimiter}"Cruz"{tuple_delimiter}"CONFLICTS_WITH"{tuple_delimiter}"Jordan's commitment to discovery is in rebellion against Cruz's vision of control and order."{tuple_delimiter}"ideological conflict, rebellion"{tuple_delimiter}5){record_delimiter}
+("relationship"{tuple_delimiter}"Taylor"{tuple_delimiter}"The Device"{tuple_delimiter}"VALUES"{tuple_delimiter}"Taylor shows reverence towards the device, indicating its importance and potential impact."{tuple_delimiter}"reverence, technological significance"{tuple_delimiter}9){record_delimiter}
 ("content_keywords"{tuple_delimiter}"power dynamics, ideological conflict, discovery, rebellion"){completion_delimiter}
 #############################""",
     """Example 2:
@@ -121,10 +155,10 @@ Output:
 ("entity"{tuple_delimiter}"Crude Oil"{tuple_delimiter}"commodity"{tuple_delimiter}"Crude oil prices rose to $87.60 per barrel due to supply constraints and strong demand."){record_delimiter}
 ("entity"{tuple_delimiter}"Market Selloff"{tuple_delimiter}"market_trend"{tuple_delimiter}"Market selloff refers to the significant decline in stock values due to investor concerns over interest rates and regulations."){record_delimiter}
 ("entity"{tuple_delimiter}"Federal Reserve Policy Announcement"{tuple_delimiter}"economic_policy"{tuple_delimiter}"The Federal Reserve's upcoming policy announcement is expected to impact investor confidence and market stability."){record_delimiter}
-("relationship"{tuple_delimiter}"Global Tech Index"{tuple_delimiter}"Market Selloff"{tuple_delimiter}"The decline in the Global Tech Index is part of the broader market selloff driven by investor concerns."{tuple_delimiter}"market performance, investor sentiment"{tuple_delimiter}9){record_delimiter}
-("relationship"{tuple_delimiter}"Nexon Technologies"{tuple_delimiter}"Global Tech Index"{tuple_delimiter}"Nexon Technologies' stock decline contributed to the overall drop in the Global Tech Index."{tuple_delimiter}"company impact, index movement"{tuple_delimiter}8){record_delimiter}
-("relationship"{tuple_delimiter}"Gold Futures"{tuple_delimiter}"Market Selloff"{tuple_delimiter}"Gold prices rose as investors sought safe-haven assets during the market selloff."{tuple_delimiter}"market reaction, safe-haven investment"{tuple_delimiter}10){record_delimiter}
-("relationship"{tuple_delimiter}"Federal Reserve Policy Announcement"{tuple_delimiter}"Market Selloff"{tuple_delimiter}"Speculation over Federal Reserve policy changes contributed to market volatility and investor selloff."{tuple_delimiter}"interest rate impact, financial regulation"{tuple_delimiter}7){record_delimiter}
+("relationship"{tuple_delimiter}"Global Tech Index"{tuple_delimiter}"Market Selloff"{tuple_delimiter}"PART_OF"{tuple_delimiter}"The decline in the Global Tech Index is part of the broader market selloff driven by investor concerns."{tuple_delimiter}"market performance, investor sentiment"{tuple_delimiter}9){record_delimiter}
+("relationship"{tuple_delimiter}"Nexon Technologies"{tuple_delimiter}"Global Tech Index"{tuple_delimiter}"CONTRIBUTED_TO"{tuple_delimiter}"Nexon Technologies' stock decline contributed to the overall drop in the Global Tech Index."{tuple_delimiter}"company impact, index movement"{tuple_delimiter}8){record_delimiter}
+("relationship"{tuple_delimiter}"Gold Futures"{tuple_delimiter}"Market Selloff"{tuple_delimiter}"REACTED_TO"{tuple_delimiter}"Gold prices rose as investors sought safe-haven assets during the market selloff."{tuple_delimiter}"market reaction, safe-haven investment"{tuple_delimiter}10){record_delimiter}
+("relationship"{tuple_delimiter}"Federal Reserve Policy Announcement"{tuple_delimiter}"Market Selloff"{tuple_delimiter}"INFLUENCED_BY"{tuple_delimiter}"Speculation over Federal Reserve policy changes contributed to market volatility and investor selloff."{tuple_delimiter}"interest rate impact, financial regulation"{tuple_delimiter}7){record_delimiter}
 ("content_keywords"{tuple_delimiter}"market downturn, investor sentiment, commodities, Federal Reserve, stock performance"){completion_delimiter}
 #############################""",
     """Example 3:
@@ -142,11 +176,29 @@ Output:
 ("entity"{tuple_delimiter}"100m Sprint Record"{tuple_delimiter}"record"{tuple_delimiter}"The 100m sprint record is a benchmark in athletics, recently broken by Noah Carter."){record_delimiter}
 ("entity"{tuple_delimiter}"Carbon-Fiber Spikes"{tuple_delimiter}"equipment"{tuple_delimiter}"Carbon-fiber spikes are advanced sprinting shoes that provide enhanced speed and traction."){record_delimiter}
 ("entity"{tuple_delimiter}"World Athletics Federation"{tuple_delimiter}"organization"{tuple_delimiter}"The World Athletics Federation is the governing body overseeing the World Athletics Championship and record validations."){record_delimiter}
-("relationship"{tuple_delimiter}"World Athletics Championship"{tuple_delimiter}"Tokyo"{tuple_delimiter}"The World Athletics Championship is being hosted in Tokyo."{tuple_delimiter}"event location, international competition"{tuple_delimiter}8){record_delimiter}
-("relationship"{tuple_delimiter}"Noah Carter"{tuple_delimiter}"100m Sprint Record"{tuple_delimiter}"Noah Carter set a new 100m sprint record at the championship."{tuple_delimiter}"athlete achievement, record-breaking"{tuple_delimiter}10){record_delimiter}
-("relationship"{tuple_delimiter}"Noah Carter"{tuple_delimiter}"Carbon-Fiber Spikes"{tuple_delimiter}"Noah Carter used carbon-fiber spikes to enhance performance during the race."{tuple_delimiter}"athletic equipment, performance boost"{tuple_delimiter}7){record_delimiter}
-("relationship"{tuple_delimiter}"World Athletics Federation"{tuple_delimiter}"100m Sprint Record"{tuple_delimiter}"The World Athletics Federation is responsible for validating and recognizing new sprint records."{tuple_delimiter}"sports regulation, record certification"{tuple_delimiter}9){record_delimiter}
+("relationship"{tuple_delimiter}"World Athletics Championship"{tuple_delimiter}"Tokyo"{tuple_delimiter}"HOSTED_IN"{tuple_delimiter}"The World Athletics Championship is being hosted in Tokyo."{tuple_delimiter}"event location, international competition"{tuple_delimiter}8){record_delimiter}
+("relationship"{tuple_delimiter}"Noah Carter"{tuple_delimiter}"100m Sprint Record"{tuple_delimiter}"SET_RECORD"{tuple_delimiter}"Noah Carter set a new 100m sprint record at the championship."{tuple_delimiter}"athlete achievement, record-breaking"{tuple_delimiter}10){record_delimiter}
+("relationship"{tuple_delimiter}"Noah Carter"{tuple_delimiter}"Carbon-Fiber Spikes"{tuple_delimiter}"USED_EQUIPMENT"{tuple_delimiter}"Noah Carter used carbon-fiber spikes to enhance performance during the race."{tuple_delimiter}"athletic equipment, performance boost"{tuple_delimiter}7){record_delimiter}
+("relationship"{tuple_delimiter}"World Athletics Federation"{tuple_delimiter}"100m Sprint Record"{tuple_delimiter}"VALIDATES"{tuple_delimiter}"The World Athletics Federation is responsible for validating and recognizing new sprint records."{tuple_delimiter}"sports regulation, record certification"{tuple_delimiter}9){record_delimiter}
 ("content_keywords"{tuple_delimiter}"athletics, sprinting, record-breaking, sports technology, competition"){completion_delimiter}
+#############################""",
+    """Example 4:
+
+Entity_types: [person, organization, team, project]
+Text:
+```
+Sarah is a software engineer at Acme Inc, working on the new Phoenix project. She is part of the Core team.
+```
+
+Output:
+("entity"{tuple_delimiter}"Sarah"{tuple_delimiter}"person"{tuple_delimiter}"Sarah is a software engineer at Acme Inc."){record_delimiter}
+("entity"{tuple_delimiter}"Acme Inc"{tuple_delimiter}"organization"{tuple_delimiter}"Acme Inc is the company where Sarah works."){record_delimiter}
+("entity"{tuple_delimiter}"Phoenix"{tuple_delimiter}"project"{tuple_delimiter}"Phoenix is the project Sarah is working on."){record_delimiter}
+("entity"{tuple_delimiter}"Core team"{tuple_delimiter}"team"{tuple_delimiter}"Core team is the team Sarah is a part of."){record_delimiter}
+("relationship"{tuple_delimiter}"Sarah"{tuple_delimiter}"Acme Inc"{tuple_delimiter}"WORKS_AT"{tuple_delimiter}"Sarah is an employee of Acme Inc."{tuple_delimiter}"employment, company"{tuple_delimiter}8){record_delimiter}
+("relationship"{tuple_delimiter}"Sarah"{tuple_delimiter}"Phoenix"{tuple_delimiter}"WORKS_ON"{tuple_delimiter}"Sarah is working on the Phoenix project."{tuple_delimiter}"project, assignment"{tuple_delimiter}9){record_delimiter}
+("relationship"{tuple_delimiter}"Sarah"{tuple_delimiter}"Core team"{tuple_delimiter}"MEMBER_OF"{tuple_delimiter}"Sarah is a member of the Core team."{tuple_delimiter}"team, membership"{tuple_delimiter}7){record_delimiter}
+("content_keywords"{tuple_delimiter}"employee, project, team, organization"){completion_delimiter}
 #############################""",
 ]
 
@@ -170,6 +222,11 @@ Output:
 PROMPTS["entity_continue_extraction"] = """
 MANY entities and relationships were missed in the last extraction. Please find only the missing entities and relationships from previous text.
 
+---Noise Reduction---
+- **Extract only the most critical entities and relationships.** Avoid extracting entities that are mentioned in passing or do not play a significant role in the overall context of the workspace.
+- **Focus on relationships that are clearly defined and add value to the graph.** Do not create relationships that are weak or ambiguous.
+- **Keep descriptions concise and to the point.** Avoid including information that is not directly relevant to the entity's role in the workspace.
+
 ---Remember Steps---
 
 1. Identify all entities. For each identified entity, extract the following information:
@@ -182,13 +239,14 @@ Format each entity as ("entity"{tuple_delimiter}<entity_name>{tuple_delimiter}<e
 For each pair of related entities, extract the following information:
 - source_entity: name of the source entity, as identified in step 1
 - target_entity: name of the target entity, as identified in step 1
+- relationship_tag: a short, high-level label for the relationship, like "WORKS_AT", "REPORTS_TO", or "OWNS".
 - relationship_description: explanation as to why you think the source entity and the target entity are related to each other
 - relationship_strength: a numeric score indicating strength of the relationship between the source entity and target entity
 - relationship_keywords: one or more high-level key words that summarize the overarching nature of the relationship, focusing on concepts or themes rather than specific details
 
 **IMPORTANT: All relationships are DIRECTED and should have clear directionality from source to target. Consider the logical flow, causality, hierarchy, or influence when determining the direction. For example: "Company A" -> "Product B" (company produces product), "Manager C" -> "Team D" (manager leads team), "Event E" -> "Outcome F" (event causes outcome). This directional structure is essential for unidirectional graph traversal.**
 
-Format each relationship as ("relationship"{tuple_delimiter}<source_entity>{tuple_delimiter}<target_entity>{tuple_delimiter}<relationship_description>{tuple_delimiter}<relationship_keywords>{tuple_delimiter}<relationship_strength>)
+Format each relationship as ("relationship"{tuple_delimiter}<source_entity>{tuple_delimiter}<target_entity>{tuple_delimiter}<relationship_tag>{tuple_delimiter}<relationship_description>{tuple_delimiter}<relationship_keywords>{tuple_delimiter}<relationship_strength>)
 
 3. Identify high-level key words that summarize the main concepts, themes, or topics of the entire text. These should capture the overarching ideas present in the document.
 Format the content-level key words as ("content_keywords"{tuple_delimiter}<high_level_keywords>)
@@ -539,6 +597,27 @@ Output:
 ("major_category"{tuple_delimiter}"Business Events & Training Center"{tuple_delimiter}"Strategic business coordination that drives company growth and employee development"){completion_delimiter}
 #############################""",
 ]
+
+PROMPTS["topic_extraction"] = """
+---Goal---
+From the text below, identify a single, overarching topic that best summarizes the document's primary subject matter. This topic should be concise, ideally 2-4 words, and capture the main theme of the text.
+
+---Instructions---
+1.  Read the text to understand its core subject.
+2.  Distill this subject into a brief, high-level topic.
+3.  Return only the topic name and nothing else.
+
+---Example 1---
+Text: "The team discussed the new marketing campaign for the Q4 product launch, focusing on social media outreach and influencer collaborations."
+Output: Marketing Campaign Strategy
+
+---Example 2---
+Text: "This document outlines the architecture of our new authentication service, including details on JWT handling, password encryption, and multi-factor authentication."
+Output: Authentication Service Architecture
+
+---Real Data---
+Text: {input_text}
+Output:"""
 
 PROMPTS["naive_rag_response"] = """---Role---
 

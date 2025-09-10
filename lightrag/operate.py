@@ -470,7 +470,7 @@ async def _handle_single_relationship_extraction(
     chunk_key: str,
     file_path: str = "unknown_source",
 ):
-    if len(record_attributes) < 5 or '"relationship"' not in record_attributes[0]:
+    if len(record_attributes) < 6 or '"relationship"' not in record_attributes[0]:
         return None
 
     try:
@@ -505,14 +505,20 @@ async def _handle_single_relationship_extraction(
                 f"Relationship source and target are the same in: {record_attributes}"
             )
             return None
+        
+        # Process relationship tag
+        relationship_tag = sanitize_text_for_encoding(record_attributes[3])
+        relationship_tag = clean_str(relationship_tag)
+        relationship_tag = normalize_extracted_info(relationship_tag, is_entity=True)
+
 
         # Process relationship description with same cleaning pipeline
-        edge_description = sanitize_text_for_encoding(record_attributes[3])
+        edge_description = sanitize_text_for_encoding(record_attributes[4])
         edge_description = clean_str(edge_description)
         edge_description = normalize_extracted_info(edge_description)
 
         # Process keywords with same cleaning pipeline
-        edge_keywords = sanitize_text_for_encoding(record_attributes[4])
+        edge_keywords = sanitize_text_for_encoding(record_attributes[5])
         edge_keywords = clean_str(edge_keywords)
         edge_keywords = normalize_extracted_info(edge_keywords, is_entity=True)
         edge_keywords = edge_keywords.replace("，", ",")
@@ -528,6 +534,7 @@ async def _handle_single_relationship_extraction(
             src_id=source,
             tgt_id=target,
             weight=weight,
+            tag=relationship_tag,
             description=edge_description,
             keywords=edge_keywords,
             source_id=edge_source_id,
@@ -1134,6 +1141,7 @@ async def _rebuild_single_relationship(
     descriptions = []
     keywords = []
     weights = []
+    tags = []
     file_paths = set()
 
     for rel_data in all_relationship_data:
@@ -1143,17 +1151,25 @@ async def _rebuild_single_relationship(
             keywords.append(rel_data["keywords"])
         if rel_data.get("weight"):
             weights.append(rel_data["weight"])
+        if rel_data.get("tag"):
+            tags.append(rel_data["tag"])
         if rel_data.get("file_path"):
             file_paths.add(rel_data["file_path"])
 
     # Remove duplicates while preserving order
     description_list = list(dict.fromkeys(descriptions))
     keywords = list(dict.fromkeys(keywords))
+    tags = list(dict.fromkeys(tags))
 
     combined_keywords = (
         ", ".join(set(keywords))
         if keywords
         else current_relationship.get("keywords", "")
+    )
+    combined_tags = (
+        ", ".join(set(tags))
+        if tags
+        else current_relationship.get("tag", "")
     )
 
     weight = sum(weights) if weights else current_relationship.get("weight", 1.0)
@@ -1179,6 +1195,7 @@ async def _rebuild_single_relationship(
         if final_description
         else current_relationship.get("description", ""),
         "keywords": combined_keywords,
+        "tag": combined_tags,
         "weight": weight,
         "source_id": GRAPH_FIELD_SEP.join(chunk_ids),
         "file_path": GRAPH_FIELD_SEP.join([fp for fp in file_paths if fp])
@@ -1200,7 +1217,7 @@ async def _rebuild_single_relationship(
         )
 
     # Insert new vector record
-    rel_content = f"{combined_keywords}\t{src}\n{tgt}\n{final_description}"
+    rel_content = f"{combined_keywords}\t{combined_tags}\t{src}\n{tgt}\n{final_description}"
     await relationships_vdb.upsert(
         {
             rel_vdb_id: {
@@ -1209,6 +1226,7 @@ async def _rebuild_single_relationship(
                 "source_id": updated_relationship_data["source_id"],
                 "content": rel_content,
                 "keywords": combined_keywords,
+                "tag": combined_tags,
                 "description": final_description,
                 "weight": weight,
                 "file_path": updated_relationship_data["file_path"],
@@ -1345,6 +1363,7 @@ async def _merge_edges_then_upsert(
     already_description = []
     already_keywords = []
     already_file_paths = []
+    already_tags = []
 
     if await knowledge_graph_inst.has_edge(src_id, tgt_id):
         already_edge = await knowledge_graph_inst.get_edge(src_id, tgt_id)
@@ -1376,6 +1395,12 @@ async def _merge_edges_then_upsert(
                 already_keywords.extend(
                     split_string_by_multi_markers(
                         already_edge["keywords"], [GRAPH_FIELD_SEP]
+                    )
+                )
+            if already_edge.get("tag") is not None:
+                already_tags.extend(
+                    split_string_by_multi_markers(
+                        already_edge["tag"], [GRAPH_FIELD_SEP]
                     )
                 )
 
@@ -1424,18 +1449,27 @@ async def _merge_edges_then_upsert(
 
     # Split all existing and new keywords into individual terms, then combine and deduplicate
     all_keywords = set()
+    all_tags = set()
     # Process already_keywords (which are comma-separated)
     for keyword_str in already_keywords:
         if keyword_str:  # Skip empty strings
             all_keywords.update(k.strip() for k in keyword_str.split(",") if k.strip())
+    for tag_str in already_tags:
+        if tag_str:
+            all_tags.update(t.strip() for t in tag_str.split(",") if t.strip())
     # Process new keywords from edges_data
     for edge in edges_data:
         if edge.get("keywords"):
             all_keywords.update(
                 k.strip() for k in edge["keywords"].split(",") if k.strip()
             )
+        if edge.get("tag"):
+            all_tags.update(
+                t.strip() for t in edge["tag"].split(",") if t.strip()
+            )
     # Join all unique keywords with commas
     keywords = ",".join(sorted(all_keywords))
+    tags = ",".join(sorted(all_tags))
 
     source_id = GRAPH_FIELD_SEP.join(
         set(
@@ -1474,6 +1508,7 @@ async def _merge_edges_then_upsert(
         weight=weight,
         description=description,
         keywords=keywords,
+        tag=tags,
         source_id=source_id,
         file_path=file_path,
         created_at=int(time.time()),
