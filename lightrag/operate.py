@@ -419,7 +419,7 @@ async def _handle_single_entity_extraction(
         entity_name = clean_str(entity_name).strip()
 
         # Step 3: Business logic normalization
-        entity_name = normalize_extracted_info(entity_name, is_entity=True)
+        entity_name = normalize_extracted_info(entity_name, is_entity=True).lower()
 
         # Validate entity name after all cleaning steps
         if not entity_name or not entity_name.strip():
@@ -484,12 +484,12 @@ async def _handle_single_relationship_extraction(
         # Step 2: HTML and control character cleaning
         source = clean_str(source)
         # Step 3: Business logic normalization
-        source = normalize_extracted_info(source, is_entity=True)
+        source = normalize_extracted_info(source, is_entity=True).lower()
 
         # Same pipeline for target entity
         target = sanitize_text_for_encoding(record_attributes[2])
         target = clean_str(target)
-        target = normalize_extracted_info(target, is_entity=True)
+        target = normalize_extracted_info(target, is_entity=True).lower()
 
         # Validate entity names after all cleaning steps
         if not source or not source.strip():

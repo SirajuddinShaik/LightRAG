@@ -7,7 +7,7 @@ consistency and makes maintenance easier.
 """
 
 # Default values for server settings
-DEFAULT_WOKERS = 2
+DEFAULT_WOKERS = 5
 DEFAULT_MAX_GRAPH_NODES = 1000
 
 # Default values for extraction settings
@@ -64,13 +64,13 @@ DEFAULT_MAX_FILE_PATH_LENGTH = 32768
 DEFAULT_TEMPERATURE = 1.0
 
 # Async configuration defaults
-DEFAULT_MAX_ASYNC = 4  # Default maximum async operations
-DEFAULT_MAX_PARALLEL_INSERT = 2  # Default maximum parallel insert operations
+DEFAULT_MAX_ASYNC = 8  # Default maximum async operations
+DEFAULT_MAX_PARALLEL_INSERT = 4  # Default maximum parallel insert operations
 
 # Hierarchical edge management defaults
 DEFAULT_USE_HIERARCHICAL_EDGES = True  # Enable hierarchical edge management
-DEFAULT_EDGE_LIMIT = 50  # Maximum edges per node before triggering hierarchical splitting
-DEFAULT_SIMILARITY_THRESHOLD = 0.7  # Similarity threshold for smart routing
+DEFAULT_EDGE_LIMIT = 20  # Maximum edges per node before triggering hierarchical splitting
+DEFAULT_SIMILARITY_THRESHOLD = 0.6  # Similarity threshold for smart routing
 
 # Embedding configuration defaults
 DEFAULT_EMBEDDING_FUNC_MAX_ASYNC = 8  # Default max async for embedding functions

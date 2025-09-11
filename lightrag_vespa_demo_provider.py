@@ -22,7 +22,7 @@ load_dotenv()
 import nest_asyncio
 client = openai.OpenAI(
 	api_key=os.getenv("OPENAI_API_KEY"),
-	base_url="https://veronica.pratikn.com"
+    base_url = os.getenv("LLM_BASE_URL")
 )
 
 import nest_asyncio
@@ -33,8 +33,8 @@ nest_asyncio.apply()
 load_dotenv()
 gemini_api_key = os.getenv("GEMINI_API_KEY")
 
-WORKING_DIR = "./data/vespa_emails_rag2"
-VESPA_JSON_FILE = "vespa_complete_export_20250902_164758.json"
+WORKING_DIR = "./data/static_vespa_2"
+VESPA_JSON_FILE = "data/vespa_complete_export_20250902_164758.json"
 
 # Clean and recreate working directory
 if not os.path.exists(WORKING_DIR):
@@ -122,7 +122,7 @@ async def llm_model_func(
         # Call the Gemini provider
         # response = await provider.generate_content(combined_prompt)
         response = client.chat.completions.create(
-                model="gemini-2.5-flash",
+                model=os.getenv("LLM_MODEL_NAME"),
                 messages=history_messages + [
                 {
                     "role": "user",
@@ -150,7 +150,7 @@ def get_embedding_model():
     global _embedding_model
     if _embedding_model is None:
         print("Loading SentenceTransformer model (this will only happen once)...")
-        _embedding_model = SentenceTransformer("Qwen/Qwen3-Embedding-0.6B")
+        _embedding_model = SentenceTransformer("Qwen/Qwen3-Embedding-4B")
         print("SentenceTransformer model loaded successfully!")
     return _embedding_model
 
@@ -222,7 +222,7 @@ async def embedding_func(texts: list[str]) -> np.ndarray:
             except Exception as single_e:
                 print(f"Failed to process text {i+1}: {single_e}")
                 # Create a zero embedding as fallback
-                embedding_dim = 1024
+                embedding_dim = 2560
                 fallback_embedding = np.zeros((1, embedding_dim))
                 all_embeddings.append(fallback_embedding)
     
@@ -233,7 +233,7 @@ async def embedding_func(texts: list[str]) -> np.ndarray:
         return final_embeddings
     else:
         # Fallback: return zero embeddings
-        embedding_dim = 1024
+        embedding_dim = 2560
         return np.zeros((len(texts), embedding_dim))
 
 
@@ -352,7 +352,7 @@ async def initialize_rag():
         working_dir=WORKING_DIR,
         llm_model_func=llm_model_func,
         embedding_func=EmbeddingFunc(
-            embedding_dim=1024,
+            embedding_dim=2560,
             max_token_size=8192,
             func=embedding_func,
         ),
@@ -401,10 +401,10 @@ async def process_vespa_documents(rag, processor: VespaDataProcessor):
     print(f"   Unique recipients: {len(stats['recipients'])}")
     
     # Process in batches for memory efficiency
-    batch_size = 10  # Conservative batch size
+    batch_size = 20  # Conservative batch size
     successful_inserts = 0
     
-    for i in range(0, 20, batch_size):
+    for i in range(0, len(documents), batch_size):
         batch_docs = documents[i:i + batch_size]
         batch_end = min(i + batch_size, len(documents))
         
@@ -412,6 +412,7 @@ async def process_vespa_documents(rag, processor: VespaDataProcessor):
         
         # Format documents for this batch with filtering
         formatted_texts = []
+        paths = []
         filtered_count = 0
         
         for doc in batch_docs:
@@ -424,12 +425,13 @@ async def process_vespa_documents(rag, processor: VespaDataProcessor):
                 }
                 
                 # Apply email filtering
-                if processor._should_filter_email(email_data):
-                    filtered_count += 1
-                    continue
+                # if processor._should_filter_email(email_data):
+                #     filtered_count += 1
+                #     continue
                 
                 formatted_text = processor.format_document_for_rag(doc)
                 formatted_texts.append(formatted_text)
+                paths.append(doc.id)
             except Exception as e:
                 print(f"   ⚠️ Error formatting document {doc.id}: {e}")
                 continue
@@ -442,7 +444,7 @@ async def process_vespa_documents(rag, processor: VespaDataProcessor):
             continue
         
         # Combine batch into single text for LightRAG
-        batch_text = "\n\n" + ("="*80) + "\n\n".join(formatted_texts)
+        batch_text = formatted_texts
         
         # Clear memory before processing
         clear_mps_cache()
@@ -450,7 +452,7 @@ async def process_vespa_documents(rag, processor: VespaDataProcessor):
         
         try:
             print(f"   🔄 Inserting {len(formatted_texts)} documents into RAG...")
-            rag.insert(batch_text)
+            rag.insert(batch_text,file_paths = paths)
             successful_inserts += len(formatted_texts)
             print(f"   ✅ Successfully processed {len(formatted_texts)} documents")
         except Exception as e:

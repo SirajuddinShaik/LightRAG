@@ -25,7 +25,7 @@ PROMPTS["DEFAULT_ENTITY_TYPES"] = [
     "KnowledgeBase",     # A collection of information, like a wiki or database
 ]
 
-workspace_entity_types = [
+PROMPTS["DEFAULT_ENTITY_TYPES"] = [
     # People & Organization
     "Person",       # properties: name, email, role
     "Team",
@@ -63,19 +63,22 @@ Use {language} as output language.
 - **Avoid Trivial Information**: Do not extract entities or relationships that are mentioned in passing, are examples, or do not contribute to the core understanding of the workspace.
 - **Distinguish Key Projects**: Use the `KeyProject` type for projects that are critical or have high impact, and `Project` for all others.
 - **Concise Descriptions**: Keep descriptions brief and focused on the entity's role within the workspace.
+- **Clear Relationships**: Only create relationships that are well-defined and add significant value to the graph. Avoid weak or ambiguous connections.
+
 
 ---Steps---
 1.  **Identify Entities**: From the text, identify all relevant entities. For each entity, extract:
-    *   `entity_name`: The name of the entity.
-    *   `entity_type`: One of the following: [{entity_types}].
+    *   `entity_name`: The name of the entity.must be unique and it can be used to later merge with the same entity name.use a common name or simple name.
+    *   `entity_type`: One of the following: [{entity_types}].Don't invent new types.
     *   `entity_description`: A brief description of the entity's role and attributes based *only* on the text.
+    *   `entity_name`: The entity name should be specific and descriptive. If the entity is a person, use their full name if available. If it's a project or product, use the official name. Avoid generic terms like "Manager" or "Project" without additional context.
 
     Format: `("entity"{tuple_delimiter}<entity_name>{tuple_delimiter}<entity_type>{tuple_delimiter}<entity_description>)`
 
 2.  **Identify Relationships**: Identify clear, directed relationships between the entities you found. For each relationship, extract:
     *   `source_entity`: The starting entity of the relationship.
     *   `target_entity`: The ending entity of the relationship.
-    *   `relationship_tag`: A concise, uppercase tag describing the relationship (e.g., `WORKS_AT`, `REPORTS_TO`, `MANAGES`, `USES`).
+    *   `relationship_tag`: A concise, uppercase tag describing the relationship (e.g., `WORKS_AT`, `REPORTS_TO` ).Mainly used in realworld workspace graph.
     *   `relationship_description`: A brief explanation of why the entities are related.
     *   `relationship_strength`: A score from 1-10 indicating the relationship's importance.
     *   `relationship_keywords`: Keywords that summarize the relationship's theme.
